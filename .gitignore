@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# SQLite databases & logs temporários
+*.db
+*.db-shm
+*.db-wal
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Configurações de ambiente local
+.env

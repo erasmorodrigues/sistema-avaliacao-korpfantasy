@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema de Avaliação de Candidatos por Juízes</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Header Principal -->
+  <header class="app-header" id="appHeader">
+    <div class="header-container">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+            <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+            <path d="M4 22h16"/>
+            <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+            <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+            <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title" id="headerEventName">Sistema de Avaliação</h1>
+          <div class="header-meta">
+            <span class="badge" id="votingStatusBadge">Carregando...</span>
+            <span class="badge badge-outline" id="roleBadge" style="display:none;"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="header-actions" id="headerUserActions" style="display:none;">
+        <div class="user-info">
+          <span class="user-greeting">Olá, <strong id="headerUserName">Usuário</strong></span>
+        </div>
+        <button class="btn btn-sm btn-ghost" id="btnLogout" title="Encerrar Sessão">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          <span>Sair</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Notificações Toast -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Conteúdo Principal Dinâmico -->
+  <main class="app-main">
+
+    <!-- VIEW 1: LOGIN -->
+    <section class="view-section" id="viewLogin">
+      <div class="login-wrapper">
+        <div class="login-card">
+          <div class="login-header">
+            <div class="login-badge-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="m9 12 2 2 4-4"/>
+              </svg>
+            </div>
+            <h2>Acesso ao Sistema</h2>
+            <p>Entre com suas credenciais de Administrador ou Juiz</p>
+          </div>
+
+          <form id="formLogin" class="form-vertical">
+            <div class="form-group">
+              <label for="loginEmail">E-mail</label>
+              <input type="email" id="loginEmail" class="form-input" placeholder="seu.email@exemplo.com" required autocomplete="username">
+            </div>
+
+            <div class="form-group">
+              <label for="loginPassword">Senha</label>
+              <input type="password" id="loginPassword" class="form-input" placeholder="Digite sua senha" required autocomplete="current-password">
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block btn-lg" id="btnLoginSubmit">
+              <span>Entrar no Sistema</span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="5" y1="12" x2="19" y2="12"/>
+                <polyline points="12 5 19 12 12 19"/>
+              </svg>
+            </button>
+          </form>
+
+          <!-- Usuários Cadastrados para Acesso Rápido -->
+          <div class="login-quick-demo">
+            <span class="quick-demo-title">Usuários Cadastrados para Acesso:</span>
+            <div class="quick-demo-buttons" id="loginQuickDemoButtons">
+              <!-- Preenchido dinamicamente via JS com Admin sempre em 1º e todos os juízes -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: PAINEL DO JUIZ -->
+    <section class="view-section" id="viewJudge" style="display:none;">
+      <div class="container">
+        
+        <!-- Barra de Progresso do Juiz -->
+        <div class="judge-progress-card">
+          <div class="progress-info">
+            <div>
+              <h2 class="section-title">Minha Bancada de Avaliação</h2>
+              <p class="section-subtitle">Avalie cada candidato atribuindo notas inteiras de 1 a 10 nas categorias ativas.</p>
+            </div>
+            <div class="progress-stats">
+              <span class="progress-fraction" id="judgeProgressFraction">0 / 0</span>
+              <span class="progress-label">candidatos avaliados</span>
+            </div>
+          </div>
+          <div class="progress-bar-bg">
+            <div class="progress-bar-fill" id="judgeProgressBar" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <!-- Alerta de Bloqueio se Votação Fechada -->
+        <div class="alert alert-warning" id="judgeVotingClosedAlert" style="display:none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <div>
+            <strong>Atenção:</strong> A votação foi encerrada pelo Administrador. Não é mais permitido alterar ou salvar notas.
+          </div>
+        </div>
+
+        <!-- Filtros Rápidos -->
+        <div class="judge-toolbar">
+          <div class="filter-pills">
+            <button class="pill active" data-filter="all" id="filterAll">Todos (<span id="countAll">0</span>)</button>
+            <button class="pill" data-filter="pending" id="filterPending">Pendentes (<span id="countPending">0</span>)</button>
+            <button class="pill" data-filter="evaluated" id="filterEvaluated">Avaliados (<span id="countEvaluated">0</span>)</button>
+          </div>
+          <div class="search-box">
+            <input type="text" id="judgeSearchCandidate" class="form-input form-input-sm" placeholder="Buscar candidato...">
+          </div>
+        </div>
+
+        <!-- Grid de Candidatos para o Juiz -->
+        <div class="judge-candidates-grid" id="judgeCandidatesGrid">
+          <!-- Injetado dinamicamente via JS -->
+        </div>
+
+      </div>
+    </section>
+
+    <!-- VIEW 3: FORMULÁRIO DE AVALIAÇÃO DO CANDIDATO (JUIZ) -->
+    <section class="view-section" id="viewJudgeEvaluation" style="display:none;">
+      <div class="container container-sm">
+        <div class="eval-header-nav">
+          <button class="btn btn-sm btn-ghost" id="btnBackToJudgeList">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            <span>Voltar para Lista de Candidatos</span>
+          </button>
+        </div>
+
+        <div class="eval-card">
+          <!-- Perfil do Candidato em Avaliação -->
+          <div class="candidate-eval-profile">
+            <div class="candidate-badge-large">
+              <span class="candidate-number-tag" id="evalCandidateNumber">#00</span>
+            </div>
+            <div class="candidate-details">
+              <h2 id="evalCandidateName">Nome do Candidato</h2>
+              <p id="evalCandidateDesc" class="candidate-desc-text">Descrição da performance...</p>
+              <div class="eval-status-indicator" id="evalCurrentStatus">
+                <!-- Status PENDENTE / CONCLUÍDO -->
+              </div>
+            </div>
+          </div>
+
+          <hr class="divider">
+
+          <!-- Categorias para atribuição de notas de 1 a 10 -->
+          <div class="eval-categories-list" id="evalCategoriesList">
+            <!-- Categorias com botões táteis de 1 a 10 injetados via JS -->
+          </div>
+
+          <!-- Rodapé de Confirmação -->
+          <div class="eval-footer">
+            <div class="eval-summary-notice">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+              <span>Todas as categorias devem receber notas inteiras de <strong>1 a 10</strong> para confirmar.</span>
+            </div>
+            <button class="btn btn-primary btn-lg btn-block" id="btnConfirmEvaluation">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              <span id="btnConfirmText">Salvar e Confirmar Avaliação</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: PAINEL ADMINISTRATIVO -->
+    <section class="view-section" id="viewAdmin" style="display:none;">
+      <div class="admin-layout">
+        <!-- Sidebar de Navegação Admin -->
+        <aside class="admin-sidebar">
+          <nav class="admin-nav">
+            <button class="admin-nav-item active" data-tab="tabDashboard">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+              <span>Visão Geral & Dashboard</span>
+            </button>
+            <button class="admin-nav-item" data-tab="tabRankings">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+              <span>Classificação & Vencedor</span>
+            </button>
+            <button class="admin-nav-item" data-tab="tabMonitoring">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+              <span>Monitoramento de Votos</span>
+            </button>
+            <button class="admin-nav-item" data-tab="tabCandidates">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span>Candidatos</span>
+            </button>
+            <button class="admin-nav-item" data-tab="tabJudges">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 15 2 2 4-4"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 10 2 2 4-4"/></svg>
+              <span>Juízes</span>
+            </button>
+            <button class="admin-nav-item" data-tab="tabCategories">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              <span>Categorias</span>
+            </button>
+            <button class="admin-nav-item" data-tab="tabSettings">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              <span>Controle do Evento</span>
+            </button>
+          </nav>
+        </aside>
+
+        <!-- Área de Conteúdo Admin -->
+        <div class="admin-content">
+
+          <!-- TAB: DASHBOARD -->
+          <div class="admin-tab-pane active" id="tabDashboard">
+            <div class="tab-header">
+              <h2>Visão Geral do Evento</h2>
+              <button class="btn btn-sm btn-outline" onclick="window.loadAdminDashboard()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/></svg>
+                <span>Atualizar Métricas</span>
+              </button>
+            </div>
+
+            <!-- Cards de KPIs -->
+            <div class="kpi-grid">
+              <div class="kpi-card">
+                <div class="kpi-icon icon-purple">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                </div>
+                <div class="kpi-content">
+                  <span class="kpi-label">Candidatos Cadastrados</span>
+                  <strong class="kpi-value" id="kpiTotalCandidates">0</strong>
+                </div>
+              </div>
+
+              <div class="kpi-card">
+                <div class="kpi-icon icon-blue">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 15 2 2 4-4"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 10 2 2 4-4"/></svg>
+                </div>
+                <div class="kpi-content">
+                  <span class="kpi-label">Juízes Habilitados</span>
+                  <strong class="kpi-value" id="kpiTotalJudges">0</strong>
+                </div>
+              </div>
+
+              <div class="kpi-card">
+                <div class="kpi-icon icon-emerald">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+                </div>
+                <div class="kpi-content">
+                  <span class="kpi-label">Submissões Concluídas</span>
+                  <strong class="kpi-value" id="kpiSubmissionsDone">0</strong>
+                  <span class="kpi-subtext" id="kpiSubmissionsPending">0 pendentes</span>
+                </div>
+              </div>
+
+              <div class="kpi-card">
+                <div class="kpi-icon icon-amber">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+                </div>
+                <div class="kpi-content">
+                  <span class="kpi-label">Progresso Geral</span>
+                  <strong class="kpi-value" id="kpiCompletionPercentage">0%</strong>
+                  <span class="kpi-subtext" id="kpiTotalNotes">0 notas registradas</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card Destaque do Vencedor -->
+            <div class="winner-spotlight" id="winnerSpotlight">
+              <!-- Conteúdo injetado via JS -->
+            </div>
+          </div>
+
+          <!-- TAB: CLASSIFICAÇÃO & RESULTADOS -->
+          <div class="admin-tab-pane" id="tabRankings">
+            <div class="tab-header">
+              <div>
+                <h2>Classificação Oficial dos Candidatos</h2>
+                <p class="tab-subtitle">Calculada automaticamente pela média das notas válidas (soma ÷ quantidade total).</p>
+              </div>
+              <div class="tab-actions">
+                <button class="btn btn-sm btn-outline" onclick="window.loadAdminRankings()">Atualizar Resultados</button>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table class="data-table" id="rankingsTable">
+                <thead>
+                  <tr>
+                    <th style="width: 80px;">Posição</th>
+                    <th>Candidato</th>
+                    <th>Média Final</th>
+                    <th>Notas Válidas</th>
+                    <th>Juízes</th>
+                    <th>Médias por Categoria</th>
+                  </tr>
+                </thead>
+                <tbody id="rankingsTableBody">
+                  <!-- Linhas da classificação -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- TAB: MONITORAMENTO DE VOTOS -->
+          <div class="admin-tab-pane" id="tabMonitoring">
+            <div class="tab-header">
+              <div>
+                <h2>Progresso Individual dos Juízes</h2>
+                <p class="tab-subtitle">Acompanhe em tempo real quem já avaliou cada candidato.</p>
+              </div>
+            </div>
+
+            <div class="judges-progress-list" id="judgesProgressList">
+              <!-- Cards de progresso individual -->
+            </div>
+
+            <h3 style="margin-top: 2rem; margin-bottom: 1rem;">Matriz Detalhada de Notas</h3>
+            <div class="table-container" id="matrixContainer">
+              <!-- Matriz completa de notas -->
+            </div>
+          </div>
+
+          <!-- TAB: CANDIDATOS (CRUD) -->
+          <div class="admin-tab-pane" id="tabCandidates">
+            <div class="tab-header">
+              <div>
+                <h2>Gerenciar Candidatos</h2>
+                <p class="tab-subtitle">Cadastre os participantes que serão avaliados pelos juízes.</p>
+              </div>
+              <button class="btn btn-primary" onclick="window.openCandidateModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Novo Candidato</span>
+              </button>
+            </div>
+
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Nº</th>
+                    <th>Nome do Candidato</th>
+                    <th>Descrição / Apresentação</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="candidatesTableBody">
+                  <!-- Candidatos -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- TAB: JUÍZES (CRUD) -->
+          <div class="admin-tab-pane" id="tabJudges">
+            <div class="tab-header">
+              <div>
+                <h2>Gerenciar Juízes</h2>
+                <p class="tab-subtitle">Cadastre os avaliadores que terão login exclusivo para votar.</p>
+              </div>
+              <button class="btn btn-primary" onclick="window.openJudgeModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Novo Juiz</span>
+              </button>
+            </div>
+
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>E-mail</th>
+                    <th>Status</th>
+                    <th>Criado em</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="judgesTableBody">
+                  <!-- Juízes -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- TAB: CATEGORIAS (CRUD) -->
+          <div class="admin-tab-pane" id="tabCategories">
+            <div class="tab-header">
+              <div>
+                <h2>Categorias de Avaliação</h2>
+                <p class="tab-subtitle">Defina individualmente os critérios em que os candidatos receberão notas de 1 a 10.</p>
+              </div>
+              <button class="btn btn-primary" onclick="window.openCategoryModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Nova Categoria</span>
+              </button>
+            </div>
+
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Ordem</th>
+                    <th>Nome do Critério</th>
+                    <th>Descrição / Critérios</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="categoriesTableBody">
+                  <!-- Categorias -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- TAB: CONTROLE DO EVENTO & CONFIGURAÇÕES -->
+          <div class="admin-tab-pane" id="tabSettings">
+            <div class="tab-header">
+              <div>
+                <h2>Controle e Governança do Evento</h2>
+                <p class="tab-subtitle">Gerencie o status da votação, encerramento oficial e regras de apuração.</p>
+              </div>
+            </div>
+
+            <div class="settings-grid">
+              <div class="settings-card">
+                <h3>Status da Votação</h3>
+                <p>Abra ou encerre a votação. Ao encerrar, nenhuma nota pode mais ser modificada.</p>
+                
+                <div class="status-selector-group">
+                  <label class="radio-card">
+                    <input type="radio" name="eventVotingStatus" value="OPEN" id="statusOpen">
+                    <div class="radio-card-content">
+                      <span class="status-indicator status-open"></span>
+                      <div>
+                        <strong>Votação Aberta</strong>
+                        <p>Juízes podem avaliar normalmente</p>
+                      </div>
+                    </div>
+                  </label>
+
+                  <label class="radio-card">
+                    <input type="radio" name="eventVotingStatus" value="PAUSED" id="statusPaused">
+                    <div class="radio-card-content">
+                      <span class="status-indicator status-paused"></span>
+                      <div>
+                        <strong>Votação Pausada</strong>
+                        <p>Interrupção temporária</p>
+                      </div>
+                    </div>
+                  </label>
+
+                  <label class="radio-card">
+                    <input type="radio" name="eventVotingStatus" value="CLOSED" id="statusClosed">
+                    <div class="radio-card-content">
+                      <span class="status-indicator status-closed"></span>
+                      <div>
+                        <strong>Votação Encerrada</strong>
+                        <p>Bloqueio total de novas notas ou correções</p>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <h3>Parâmetros de Operação</h3>
+                
+                <div class="toggle-group">
+                  <div class="toggle-info">
+                    <strong>Permitir Correção de Notas antes de Encerrar</strong>
+                    <p>Se ativado, o juiz pode alterar suas notas enviadas enquanto a votação estiver aberta.</p>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingAllowCorrections">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-group">
+                  <div class="toggle-info">
+                    <strong>Exibir Vencedor Provisório durante Apuração</strong>
+                    <p>Permite visualizar no dashboard o candidato em 1º lugar antes do encerramento oficial.</p>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingShowProvisionalWinner">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="toggle-group">
+                  <div class="toggle-info">
+                    <strong>Publicar Resultados Oficiais</strong>
+                    <p>Libera a página pública de resultados para consulta de todos.</p>
+                  </div>
+                  <label class="switch">
+                    <input type="checkbox" id="settingPublishResults">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+
+                <div class="form-group" style="margin-top: 1.5rem;">
+                  <label for="settingEventName">Nome do Evento</label>
+                  <input type="text" id="settingEventName" class="form-input" placeholder="Ex: Festival Cultural 2026">
+                </div>
+
+                <button class="btn btn-primary" id="btnSaveSettings" style="margin-top: 1rem;">
+                  <span>Salvar Alterações de Governança</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Auditoria Recente -->
+            <div class="audit-section">
+              <h3>Histórico de Auditoria do Sistema</h3>
+              <div class="table-container">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Data/Hora</th>
+                      <th>Usuário</th>
+                      <th>Ação</th>
+                      <th>Detalhes</th>
+                    </tr>
+                  </thead>
+                  <tbody id="auditLogsTableBody">
+                    <!-- Logs -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 5: RESULTADOS PÚBLICOS (DIVULGAÇÃO) -->
+    <section class="view-section" id="viewPublicResults" style="display:none;">
+      <div class="container container-sm">
+        <div class="public-results-card">
+          <div class="public-results-header">
+            <span class="badge badge-emerald">Resultado Oficial Homologado</span>
+            <h2 id="publicEventTitle">Festival de Talentos 2026</h2>
+            <p>Classificação final apurada e validada pela comissão julgadora.</p>
+          </div>
+
+          <div id="publicWinnerHighlight"></div>
+
+          <h3 style="margin-top: 2rem; margin-bottom: 1rem;">Quadro de Classificação Geral</h3>
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Posição</th>
+                  <th>Candidato</th>
+                  <th>Média Final</th>
+                  <th>Avaliações</th>
+                </tr>
+              </thead>
+              <tbody id="publicRankingsBody"></tbody>
+            </table>
+          </div>
+
+          <div style="text-align: center; margin-top: 2rem;">
+            <button class="btn btn-outline btn-sm" onclick="window.switchView('viewLogin')">Voltar ao Acesso</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL: CANDIDATO (CRIAR / EDITAR) -->
+  <div class="modal" id="modalCandidate">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modalCandidateTitle">Novo Candidato</h3>
+        <button class="btn-close" onclick="window.closeCandidateModal()">&times;</button>
+      </div>
+      <form id="formCandidate">
+        <input type="hidden" id="candidateFormId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="candidateFormName">Nome do Candidato *</label>
+            <input type="text" id="candidateFormName" class="form-input" required placeholder="Ex: Mariana Silva">
+          </div>
+          <div class="form-group">
+            <label for="candidateFormNumber">Número de Inscrição / Ordem</label>
+            <input type="text" id="candidateFormNumber" class="form-input" placeholder="Ex: 01">
+          </div>
+
+          <div class="form-group">
+            <label for="candidateFormDesc">Descrição / Apresentação</label>
+            <textarea id="candidateFormDesc" class="form-input" rows="3" placeholder="Breve biografia ou detalhes da apresentação..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" onclick="window.closeCandidateModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Salvar Candidato</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: JUIZ (CRIAR / EDITAR) -->
+  <div class="modal" id="modalJudge">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modalJudgeTitle">Novo Juiz</h3>
+        <button class="btn-close" onclick="window.closeJudgeModal()">&times;</button>
+      </div>
+      <form id="formJudge">
+        <input type="hidden" id="judgeFormId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="judgeFormName">Nome Completo *</label>
+            <input type="text" id="judgeFormName" class="form-input" required placeholder="Ex: Dra. Juliana Costa">
+          </div>
+          <div class="form-group">
+            <label for="judgeFormEmail">E-mail de Login *</label>
+            <input type="email" id="judgeFormEmail" class="form-input" required placeholder="juliana@exemplo.com">
+          </div>
+          <div class="form-group">
+            <label for="judgeFormPassword" id="judgeFormPasswordLabel">Senha de Acesso *</label>
+            <input type="password" id="judgeFormPassword" class="form-input" placeholder="Defina a senha do juiz">
+            <span class="form-hint" id="judgeFormPasswordHint" style="display:none;">Deixe em branco para manter a senha atual.</span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" onclick="window.closeJudgeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Salvar Juiz</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: CATEGORIA (CRIAR / EDITAR) -->
+  <div class="modal" id="modalCategory">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modalCategoryTitle">Nova Categoria</h3>
+        <button class="btn-close" onclick="window.closeCategoryModal()">&times;</button>
+      </div>
+      <form id="formCategory">
+        <input type="hidden" id="categoryFormId">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="categoryFormName">Nome da Categoria *</label>
+            <input type="text" id="categoryFormName" class="form-input" required placeholder="Ex: Criatividade, Figurino, Apresentação">
+          </div>
+          <div class="form-group">
+            <label for="categoryFormDesc">Descrição / Critérios de Avaliação</label>
+            <textarea id="categoryFormDesc" class="form-input" rows="3" placeholder="Instruções e critérios para orientar os juízes..."></textarea>
+          </div>
+          <div class="form-group">
+            <label for="categoryFormOrder">Ordem de Exibição</label>
+            <input type="number" id="categoryFormOrder" class="form-input" value="1" min="1">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" onclick="window.closeCategoryModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Salvar Categoria</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/js/app.js"></script>
+</body>
+</html>
