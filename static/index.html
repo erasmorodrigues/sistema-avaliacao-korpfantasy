@@ -29,6 +29,7 @@
           <div class="header-meta">
             <span class="badge" id="votingStatusBadge">Carregando...</span>
             <span class="badge badge-outline" id="roleBadge" style="display:none;"></span>
+            <span class="badge" id="headerCampaignBadge" style="display:none; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);"></span>
           </div>
         </div>
       </div>
@@ -353,12 +354,18 @@
             <div class="tab-header">
               <div>
                 <h2>Gerenciar Candidatos</h2>
-                <p class="tab-subtitle">Cadastre os participantes que serão avaliados pelos juízes.</p>
+                <p class="tab-subtitle">Cadastre os participantes da campanha ativa (<strong id="candidatesCampaignName">-</strong>). O número de inscrição é gerado automaticamente de forma sequencial.</p>
               </div>
-              <button class="btn btn-primary" onclick="window.openCandidateModal()">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                <span>Novo Candidato</span>
-              </button>
+              <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                <button class="btn btn-outline" onclick="window.openBulkCandidateModal()">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                  <span>Importar em Lote (.txt)</span>
+                </button>
+                <button class="btn btn-primary" onclick="window.openCandidateModal()">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span>Novo Candidato</span>
+                </button>
+              </div>
             </div>
 
             <div class="table-container">
@@ -537,6 +544,53 @@
               </div>
             </div>
 
+            <!-- Campanhas de Votação -->
+            <div class="card" style="margin-top: 1.5rem;">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                <div>
+                  <h3 style="margin: 0;">Campanhas de Votação</h3>
+                  <p class="tab-subtitle" style="margin: 0.25rem 0 0 0;">Crie uma nova campanha para iniciar as votações do zero ou alterne entre campanhas.</p>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="window.openNewCampaignModal()">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span>Nova Campanha</span>
+                </button>
+              </div>
+              <div class="card-body">
+                <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                  <div>
+                    <label for="campaignSelect" style="display: block; font-weight: 600; margin-bottom: 0.25rem; font-size: 0.9rem;">Campanha Ativa:</label>
+                    <select id="campaignSelect" class="form-input" style="min-width: 280px;" onchange="window.switchCampaign(this.value)">
+                      <!-- Preenchido via JS -->
+                    </select>
+                  </div>
+                  <div style="margin-top: 1.5rem;">
+                    <span class="badge badge-success" id="campaignStatusBadge">Ativa</span>
+                  </div>
+                </div>
+                <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.75rem;">Ao alternar para outra campanha, os candidatos, notas, rankings e monitoramento passam a refletir exclusivamente a campanha selecionada. Juízes e categorias permanecem preservados.</p>
+              </div>
+            </div>
+
+            <!-- Zona de Perigo: Limpar Candidatos -->
+            <div class="card" style="margin-top: 1.5rem; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.03);">
+              <div class="card-header" style="border-bottom: 1px solid rgba(239, 68, 68, 0.2);">
+                <h3 style="color: #ef4444; display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <span>Zona de Perigo - Limpar Candidatos</span>
+                </h3>
+              </div>
+              <div class="card-body">
+                <p style="color: var(--text-color); font-size: 0.95rem;">
+                  Esta opção remove <strong>todos os candidatos</strong> e <strong>todas as notas e submissões</strong> registradas na campanha ativa atual (<strong id="dangerCampaignName">Campanha Atual</strong>). Os usuários (administrador e juízes) e as categorias de avaliação não serão afetados.
+                </p>
+                <button class="btn btn-danger" style="margin-top: 1rem;" onclick="window.clearCurrentCampaignCandidates()">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  <span>Limpar Todos os Candidatos da Campanha Atual</span>
+                </button>
+              </div>
+            </div>
+
             <!-- Auditoria Recente -->
             <div class="audit-section">
               <h3>Histórico de Auditoria do Sistema</h3>
@@ -612,10 +666,6 @@
             <label for="candidateFormName">Nome do Candidato *</label>
             <input type="text" id="candidateFormName" class="form-input" required placeholder="Ex: Mariana Silva">
           </div>
-          <div class="form-group">
-            <label for="candidateFormNumber">Número de Inscrição / Ordem</label>
-            <input type="text" id="candidateFormNumber" class="form-input" placeholder="Ex: 01">
-          </div>
 
           <div class="form-group">
             <label for="candidateFormDesc">Descrição / Apresentação</label>
@@ -625,6 +675,71 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" onclick="window.closeCandidateModal()">Cancelar</button>
           <button type="submit" class="btn btn-primary">Salvar Candidato</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: IMPORTAR CANDIDATOS EM LOTE (TXT) -->
+  <div class="modal" id="modalBulkCandidate">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="modalBulkCandidateTitle">Importar Candidatos em Lote (.txt)</h3>
+        <button class="btn-close" onclick="window.closeBulkCandidateModal()">&times;</button>
+      </div>
+      <form id="formBulkCandidate" onsubmit="window.handleBulkCandidateSubmit(event)">
+        <div class="modal-body">
+          <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Selecione um arquivo de texto (<strong>.txt</strong>) contendo <strong>um nome de candidato por linha</strong>. Os números de inscrição serão atribuídos de forma sequencial automática a partir do último número cadastrado.
+          </p>
+
+          <div class="form-group">
+            <label for="bulkCandidateFileInput">Selecione o arquivo .txt:</label>
+            <input type="file" id="bulkCandidateFileInput" accept=".txt,text/plain" class="form-input" onchange="window.handleBulkCandidateFileSelected(event)">
+          </div>
+
+          <div class="form-group">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <label for="bulkCandidateText" style="margin: 0;">Ou digite/cole a lista de nomes:</label>
+              <span class="badge badge-outline" id="bulkCandidatesCount">0 candidatos identificados</span>
+            </div>
+            <textarea id="bulkCandidateText" class="form-input" rows="8" placeholder="Mariana Silva&#10;Lucas Andrade&#10;Camila Ramos" oninput="window.updateBulkCandidatePreview()"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" onclick="window.closeBulkCandidateModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmitBulkCandidate">Confirmar Importação</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: NOVA CAMPANHA DE VOTAÇÃO -->
+  <div class="modal" id="modalNewCampaign">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Nova Campanha de Votação</h3>
+        <button class="btn-close" onclick="window.closeNewCampaignModal()">&times;</button>
+      </div>
+      <form id="formNewCampaign" onsubmit="window.handleNewCampaignSubmit(event)">
+        <div class="modal-body">
+          <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Ao criar uma nova campanha, ela se tornará imediatamente a campanha ativa. A nova campanha iniciará com <strong>lista limpa de candidatos e zero votos</strong>. Juízes e critérios de avaliação continuam disponíveis.
+          </p>
+
+          <div class="form-group">
+            <label for="campaignFormName">Nome da Campanha *</label>
+            <input type="text" id="campaignFormName" class="form-input" required placeholder="Ex: Etapa Final 2026 / Edição de Inverno">
+          </div>
+
+          <div class="form-group">
+            <label for="campaignFormDesc">Descrição / Observações (opcional)</label>
+            <textarea id="campaignFormDesc" class="form-input" rows="3" placeholder="Informações ou notas sobre esta nova etapa..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" onclick="window.closeNewCampaignModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Criar e Iniciar Campanha</button>
         </div>
       </form>
     </div>

@@ -151,9 +151,21 @@
         roleBadge.textContent = "Juiz Avaliador";
         roleBadge.className = "badge badge-outline";
       }
+
+      const campBadge = document.getElementById("headerCampaignBadge");
+      if (campBadge) {
+        if (state.activeCampaign && state.activeCampaign.name) {
+          campBadge.textContent = state.activeCampaign.name;
+          campBadge.style.display = "inline-flex";
+        } else {
+          campBadge.style.display = "none";
+        }
+      }
     } else {
       headerActions.style.display = "none";
       roleBadge.style.display = "none";
+      const campBadge = document.getElementById("headerCampaignBadge");
+      if (campBadge) campBadge.style.display = "none";
     }
   }
 
@@ -290,6 +302,10 @@
     state.judge.progress = res.progress || {};
     state.eventInfo.voting_status = res.voting_status;
     state.eventInfo.allow_corrections = res.allow_corrections;
+    if (res.campaign) {
+      state.activeCampaign = res.campaign;
+      updateHeaderUI();
+    }
 
     renderJudgeProgress();
     renderJudgeCandidatesGrid();
@@ -544,6 +560,9 @@
     const stats = res.stats;
     state.admin.stats = stats;
     state.eventInfo = { ...state.eventInfo, ...stats };
+    if (stats.active_campaign) {
+      state.activeCampaign = stats.active_campaign;
+    }
     updateHeaderUI();
 
     document.getElementById("kpiTotalCandidates").textContent = stats.total_candidates;
@@ -754,8 +773,29 @@
     if (!res.success) return;
 
     state.admin.candidates = res.candidates || [];
+    if (res.active_campaign) {
+      state.activeCampaign = res.active_campaign;
+      const campNameEl = document.getElementById("candidatesCampaignName");
+      if (campNameEl) campNameEl.textContent = res.active_campaign.name;
+      const dangerCampEl = document.getElementById("dangerCampaignName");
+      if (dangerCampEl) dangerCampEl.textContent = res.active_campaign.name;
+      updateHeaderUI();
+    }
+
     const tbody = document.getElementById("candidatesTableBody");
     tbody.innerHTML = "";
+
+    if (state.admin.candidates.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 2.5rem 1rem;">
+            Nenhum candidato cadastrado nesta campanha até o momento.<br>
+            <span style="font-size: 0.85rem;">Utilize o botão "Novo Candidato" ou importe múltiplos candidatos via arquivo .txt.</span>
+          </td>
+        </tr>
+      `;
+      return;
+    }
 
     state.admin.candidates.forEach(c => {
       const tr = document.createElement("tr");
@@ -778,7 +818,6 @@
     document.getElementById("modalCandidateTitle").textContent = "Novo Candidato";
     document.getElementById("candidateFormId").value = "";
     document.getElementById("candidateFormName").value = "";
-    document.getElementById("candidateFormNumber").value = "";
     document.getElementById("candidateFormDesc").value = "";
     document.getElementById("modalCandidate").classList.add("active");
   };
@@ -787,7 +826,6 @@
     document.getElementById("modalCandidateTitle").textContent = "Editar Candidato";
     document.getElementById("candidateFormId").value = cand.id;
     document.getElementById("candidateFormName").value = cand.name;
-    document.getElementById("candidateFormNumber").value = cand.number || "";
     document.getElementById("candidateFormDesc").value = cand.description || "";
     document.getElementById("modalCandidate").classList.add("active");
   };
@@ -800,7 +838,6 @@
     e.preventDefault();
     const id = document.getElementById("candidateFormId").value;
     const name = document.getElementById("candidateFormName").value.trim();
-    const number = document.getElementById("candidateFormNumber").value.trim();
     const description = document.getElementById("candidateFormDesc").value.trim();
 
     const url = id ? `/api/admin/candidates/${id}` : "/api/admin/candidates";
@@ -808,17 +845,85 @@
 
     const res = await apiRequest(url, {
       method,
-      body: { name, number, description }
+      body: { name, description }
     });
 
     if (res.success) {
       showToast(res.message || "Candidato salvo com sucesso!", "success");
       closeCandidateModal();
       loadAdminCandidates();
+      loadAdminDashboard();
     } else {
       showToast(res.error || "Erro ao salvar candidato.", "error");
     }
   }
+
+  // --- Importação em Lote (.txt) ---
+  window.openBulkCandidateModal = function () {
+    const fileInput = document.getElementById("bulkCandidateFileInput");
+    if (fileInput) fileInput.value = "";
+    const textarea = document.getElementById("bulkCandidateText");
+    if (textarea) textarea.value = "";
+    window.updateBulkCandidatePreview();
+    document.getElementById("modalBulkCandidate").classList.add("active");
+  };
+
+  window.closeBulkCandidateModal = function () {
+    document.getElementById("modalBulkCandidate").classList.remove("active");
+  };
+
+  window.handleBulkCandidateFileSelected = function (e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function (evt) {
+      const content = evt.target.result;
+      document.getElementById("bulkCandidateText").value = content;
+      window.updateBulkCandidatePreview();
+    };
+    reader.readAsText(file, "UTF-8");
+  };
+
+  window.updateBulkCandidatePreview = function () {
+    const textarea = document.getElementById("bulkCandidateText");
+    const text = textarea ? textarea.value : "";
+    const lines = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+    const badge = document.getElementById("bulkCandidatesCount");
+    if (badge) {
+      badge.textContent = `${lines.length} candidato${lines.length === 1 ? '' : 's'} identificado${lines.length === 1 ? '' : 's'}`;
+    }
+    const btn = document.getElementById("btnSubmitBulkCandidate");
+    if (btn) {
+      btn.disabled = lines.length === 0;
+    }
+  };
+
+  window.handleBulkCandidateSubmit = async function (e) {
+    e.preventDefault();
+    const textarea = document.getElementById("bulkCandidateText");
+    const text = textarea ? textarea.value : "";
+    const names = text.split("\n").map(l => l.trim()).filter(l => l.length > 0);
+
+    if (names.length === 0) {
+      showToast("Nenhum candidato informado no arquivo ou texto.", "warning");
+      return;
+    }
+
+    const res = await apiRequest("/api/admin/candidates/bulk-import", {
+      method: "POST",
+      body: { names }
+    });
+
+    if (res.success) {
+      showToast(res.message || `${names.length} candidatos importados com sucesso!`, "success");
+      closeBulkCandidateModal();
+      loadAdminCandidates();
+      loadAdminDashboard();
+    } else {
+      showToast(res.error || "Erro ao importar candidatos.", "error");
+    }
+  };
 
   window.deleteCandidate = async function (id, name) {
     if (!confirm(`Deseja realmente excluir o candidato "${name}"? Todas as notas associadas serão removidas.`)) return;
@@ -827,6 +932,7 @@
     if (res.success) {
       showToast(res.message || "Candidato excluído.", "success");
       loadAdminCandidates();
+      loadAdminDashboard();
     } else {
       showToast(res.error || "Erro ao excluir candidato.", "error");
     }
@@ -1029,8 +1135,114 @@
     document.getElementById("settingPublishResults").checked = settings.public_results_published === "true";
     document.getElementById("settingEventName").value = settings.event_name || "";
 
+    loadAdminCampaigns();
     loadAdminAuditLogs();
   }
+
+  // --- Gerenciamento de Campanhas ---
+  async function loadAdminCampaigns() {
+    const res = await apiRequest("/api/admin/campaigns");
+    if (!res.success) return;
+
+    const select = document.getElementById("campaignSelect");
+    if (select) {
+      select.innerHTML = "";
+      (res.campaigns || []).forEach(c => {
+        const opt = document.createElement("option");
+        opt.value = c.id;
+        opt.textContent = `${c.name} (${c.candidates_count || 0} candidatos)`;
+        if (c.id === res.active_campaign_id) {
+          opt.selected = true;
+          state.activeCampaign = c;
+        }
+        select.appendChild(opt);
+      });
+    }
+
+    const activeCamp = (res.campaigns || []).find(c => c.id === res.active_campaign_id);
+    if (activeCamp) {
+      state.activeCampaign = activeCamp;
+      const dangerNameEl = document.getElementById("dangerCampaignName");
+      if (dangerNameEl) dangerNameEl.textContent = activeCamp.name;
+
+      const candCampNameEl = document.getElementById("candidatesCampaignName");
+      if (candCampNameEl) candCampNameEl.textContent = activeCamp.name;
+    }
+
+    updateHeaderUI();
+  }
+
+  window.switchCampaign = async function (campaignId) {
+    if (!campaignId) return;
+    const res = await apiRequest(`/api/admin/campaigns/${campaignId}/activate`, { method: "POST" });
+    if (res.success) {
+      showToast(res.message, "success");
+      await loadAdminCampaigns();
+      await loadAdminCandidates();
+      await loadAdminDashboard();
+      if (state.admin.currentTab === "tabRankings") await loadAdminRankings();
+      if (state.admin.currentTab === "tabMonitoring") await loadEvaluationMatrix();
+    } else {
+      showToast(res.error || "Erro ao alternar campanha.", "error");
+    }
+  };
+
+  window.openNewCampaignModal = function () {
+    document.getElementById("campaignFormName").value = "";
+    document.getElementById("campaignFormDesc").value = "";
+    document.getElementById("modalNewCampaign").classList.add("active");
+  };
+
+  window.closeNewCampaignModal = function () {
+    document.getElementById("modalNewCampaign").classList.remove("active");
+  };
+
+  window.handleNewCampaignSubmit = async function (e) {
+    e.preventDefault();
+    const name = document.getElementById("campaignFormName").value.trim();
+    const description = document.getElementById("campaignFormDesc").value.trim();
+
+    if (!name) {
+      showToast("Informe o nome da campanha.", "warning");
+      return;
+    }
+
+    const res = await apiRequest("/api/admin/campaigns", {
+      method: "POST",
+      body: { name, description }
+    });
+
+    if (res.success) {
+      showToast(res.message, "success");
+      closeNewCampaignModal();
+      await loadAdminCampaigns();
+      await loadAdminCandidates();
+      await loadAdminDashboard();
+      await loadAdminSettings();
+      if (state.admin.currentTab === "tabRankings") await loadAdminRankings();
+      if (state.admin.currentTab === "tabMonitoring") await loadEvaluationMatrix();
+    } else {
+      showToast(res.error || "Erro ao criar campanha.", "error");
+    }
+  };
+
+  window.clearCurrentCampaignCandidates = async function () {
+    const activeCampName = state.activeCampaign ? state.activeCampaign.name : "atual";
+    const confirmMsg = `ATENÇÃO: Deseja realmente excluir TODOS os candidatos e todas as notas da campanha "${activeCampName}"?\n\nEsta ação é irreversível e zerará a votação desta campanha!`;
+    if (!confirm(confirmMsg)) return;
+
+    const res = await apiRequest("/api/admin/candidates/clear-current-campaign", { method: "DELETE" });
+    if (res.success) {
+      showToast(res.message, "success");
+      await loadAdminCandidates();
+      await loadAdminDashboard();
+      await loadAdminCampaigns();
+      if (state.admin.currentTab === "tabRankings") await loadAdminRankings();
+      if (state.admin.currentTab === "tabMonitoring") await loadEvaluationMatrix();
+    } else {
+      showToast(res.error || "Erro ao limpar candidatos da campanha.", "error");
+    }
+  };
 
   async function saveAdminSettings() {
     const selectedRadio = document.querySelector('input[name="eventVotingStatus"]:checked');

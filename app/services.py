@@ -45,20 +45,52 @@ def update_setting(conn: sqlite3.Connection, key: str, value: str, user_id: Opti
         log_audit(conn, user_id, user_name, "UPDATE_SETTING", f"Configuração '{key}' alterada para '{value}'")
 
 
-def get_dashboard_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
+def get_active_campaign_id(conn: sqlite3.Connection) -> int:
+    """Retorna o ID da campanha de votação ativa no momento."""
+    raw = get_setting(conn, "active_campaign_id", "1")
+    try:
+        camp_id = int(raw)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM campaigns WHERE id = ?", (camp_id,))
+        if cursor.fetchone():
+            return camp_id
+    except Exception:
+        pass
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM campaigns ORDER BY id ASC LIMIT 1")
+    row = cursor.fetchone()
+    return row[0] if row else 1
+
+
+def get_active_campaign(conn: sqlite3.Connection) -> Dict[str, Any]:
+    """Retorna os dados da campanha ativa."""
+    camp_id = get_active_campaign_id(conn)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, description, status, created_at FROM campaigns WHERE id = ?", (camp_id,))
+    row = cursor.fetchone()
+    if row:
+        return dict(row)
+    return {"id": 1, "name": "Campanha Principal", "description": "", "status": "ACTIVE", "created_at": ""}
+
+
+def get_dashboard_stats(conn: sqlite3.Connection, campaign_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Retorna métricas consolidadas do painel administrativo:
-    - Quantidade total de candidatos cadastrados
+    - Quantidade total de candidatos cadastrados na campanha
     - Quantidade total de juízes cadastrados
     - Quantidade de categorias ativas
     - Quantidade de avaliações realizadas e pendentes
     - Percentual de conclusão da votação
     - Status atual da votação
+    - Informações da campanha ativa
     """
     cursor = conn.cursor()
+    if campaign_id is None:
+        campaign_id = get_active_campaign_id(conn)
+    active_campaign = get_active_campaign(conn)
 
-    # Contagem de candidatos ativos
-    cursor.execute("SELECT COUNT(*) FROM candidates WHERE active = 1")
+    # Contagem de candidatos ativos da campanha
+    cursor.execute("SELECT COUNT(*) FROM candidates WHERE active = 1 AND campaign_id = ?", (campaign_id,))
     total_candidates = cursor.fetchone()[0]
 
     # Contagem de juízes ativos
@@ -72,14 +104,14 @@ def get_dashboard_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
     # Total de submissões esperadas (cada juiz avalia cada candidato)
     expected_submissions = total_candidates * total_judges
 
-    # Total de submissões concluídas
+    # Total de submissões concluídas para candidatos desta campanha
     cursor.execute("""
         SELECT COUNT(DISTINCT cs.id)
         FROM candidate_submissions cs
         JOIN users u ON u.id = cs.judge_id AND u.active = 1 AND u.role = 'JUDGE'
-        JOIN candidates c ON c.id = cs.candidate_id AND c.active = 1
+        JOIN candidates c ON c.id = cs.candidate_id AND c.active = 1 AND c.campaign_id = ?
         WHERE cs.status = 'COMPLETED'
-    """)
+    """, (campaign_id,))
     completed_submissions = cursor.fetchone()[0]
     pending_submissions = max(0, expected_submissions - completed_submissions)
 
@@ -88,9 +120,9 @@ def get_dashboard_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
         SELECT COUNT(e.id)
         FROM evaluations e
         JOIN users u ON u.id = e.judge_id AND u.active = 1
-        JOIN candidates c ON c.id = e.candidate_id AND c.active = 1
+        JOIN candidates c ON c.id = e.candidate_id AND c.active = 1 AND c.campaign_id = ?
         JOIN categories cat ON cat.id = e.category_id AND cat.active = 1
-    """)
+    """, (campaign_id,))
     total_evaluations_recorded = cursor.fetchone()[0]
 
     # Total de notas esperadas
@@ -116,11 +148,12 @@ def get_dashboard_stats(conn: sqlite3.Connection) -> Dict[str, Any]:
         "allow_corrections": settings.get("allow_corrections", "true").lower() == "true",
         "public_results_published": settings.get("public_results_published", "false").lower() == "true",
         "show_provisional_winner": settings.get("show_provisional_winner", "true").lower() == "true",
-        "event_name": settings.get("event_name", "Sistema de Avaliação de Candidatos")
+        "event_name": settings.get("event_name", "Sistema de Avaliação de Candidatos"),
+        "active_campaign": active_campaign
     }
 
 
-def calculate_rankings(conn: sqlite3.Connection) -> Dict[str, Any]:
+def calculate_rankings(conn: sqlite3.Connection, campaign_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Calcula a classificação dos candidatos de acordo com as regras de negócio:
     - Média final = soma de todas as notas válidas do candidato ÷ quantidade total de notas válidas
@@ -131,14 +164,22 @@ def calculate_rankings(conn: sqlite3.Connection) -> Dict[str, Any]:
     - Desmembramento de médias por categoria
     """
     cursor = conn.cursor()
+    if campaign_id is None:
+        campaign_id = get_active_campaign_id(conn)
+    active_campaign = get_active_campaign(conn)
 
     # 1. Carregar categorias ativas
     cursor.execute("SELECT id, name, display_order FROM categories WHERE active = 1 ORDER BY display_order ASC, name ASC")
     categories = [dict(row) for row in cursor.fetchall()]
     category_map = {cat["id"]: cat["name"] for cat in categories}
 
-    # 2. Carregar todos os candidatos ativos
-    cursor.execute("SELECT id, name, number, photo_url, description FROM candidates WHERE active = 1 ORDER BY id ASC")
+    # 2. Carregar todos os candidatos ativos da campanha
+    cursor.execute("""
+        SELECT id, name, number, photo_url, description 
+        FROM candidates 
+        WHERE active = 1 AND campaign_id = ? 
+        ORDER BY CAST(number AS INTEGER) ASC, id ASC
+    """, (campaign_id,))
     candidates = [dict(row) for row in cursor.fetchall()]
 
     if not candidates:
@@ -146,13 +187,15 @@ def calculate_rankings(conn: sqlite3.Connection) -> Dict[str, Any]:
             "rankings": [],
             "winners": [],
             "is_tie": False,
+            "is_winner_tie": False,
             "total_candidates": 0,
             "categories": categories,
             "is_closed": False,
-            "is_published": False
+            "is_published": False,
+            "campaign": active_campaign
         }
 
-    # 3. Carregar todas as avaliações válidas
+    # 3. Carregar todas as avaliações válidas da campanha
     # Notas atribuídas por juízes ativos em categorias ativas com submissão concluída
     cursor.execute("""
         SELECT 
@@ -163,9 +206,10 @@ def calculate_rankings(conn: sqlite3.Connection) -> Dict[str, Any]:
         FROM evaluations e
         JOIN candidate_submissions cs ON cs.judge_id = e.judge_id AND cs.candidate_id = e.candidate_id
         JOIN users u ON u.id = e.judge_id AND u.active = 1 AND u.role = 'JUDGE'
+        JOIN candidates c ON c.id = e.candidate_id AND c.active = 1 AND c.campaign_id = ?
         JOIN categories cat ON cat.id = e.category_id AND cat.active = 1
         WHERE cs.status = 'COMPLETED'
-    """)
+    """, (campaign_id,))
     eval_rows = cursor.fetchall()
 
     # Organizar notas por candidato e categoria
@@ -289,14 +333,15 @@ def calculate_rankings(conn: sqlite3.Connection) -> Dict[str, Any]:
         "is_closed": is_closed,
         "is_published": is_published,
         "show_provisional_winner": show_provisional,
-        "voting_status": settings.get("voting_status", "OPEN")
+        "voting_status": settings.get("voting_status", "OPEN"),
+        "campaign": active_campaign
     }
 
 
-def get_judge_voting_screen(conn: sqlite3.Connection, judge_id: int) -> Dict[str, Any]:
+def get_judge_voting_screen(conn: sqlite3.Connection, judge_id: int, campaign_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Retorna os dados exclusivos necessários para a interface de votação do juiz:
-    - Lista de candidatos disponíveis
+    - Lista de candidatos disponíveis da campanha ativa
     - Status de cada candidato para este juiz (PENDING / COMPLETED)
     - Notas atribuídas por este juiz (se já existirem)
     - Categorias ativas disponíveis para avaliação
@@ -305,6 +350,9 @@ def get_judge_voting_screen(conn: sqlite3.Connection, judge_id: int) -> Dict[str
     """
     cursor = conn.cursor()
     settings = get_all_settings(conn)
+    if campaign_id is None:
+        campaign_id = get_active_campaign_id(conn)
+    active_campaign = get_active_campaign(conn)
 
     # 1. Categorias ativas ordenadas
     cursor.execute("""
@@ -315,13 +363,13 @@ def get_judge_voting_screen(conn: sqlite3.Connection, judge_id: int) -> Dict[str
     """)
     categories = [dict(row) for row in cursor.fetchall()]
 
-    # 2. Candidatos ativos
+    # 2. Candidatos ativos da campanha
     cursor.execute("""
         SELECT id, name, number, photo_url, description 
         FROM candidates 
-        WHERE active = 1 
-        ORDER BY number ASC, name ASC
-    """)
+        WHERE active = 1 AND campaign_id = ?
+        ORDER BY CAST(number AS INTEGER) ASC, name ASC
+    """, (campaign_id,))
     candidates = [dict(row) for row in cursor.fetchall()]
 
     # 3. Status de submissão deste juiz para cada candidato
@@ -390,7 +438,8 @@ def get_judge_voting_screen(conn: sqlite3.Connection, judge_id: int) -> Dict[str
         },
         "voting_status": settings.get("voting_status", "OPEN"),
         "allow_corrections": settings.get("allow_corrections", "true").lower() == "true",
-        "event_name": settings.get("event_name", "Sistema de Avaliação")
+        "event_name": settings.get("event_name", "Sistema de Avaliação"),
+        "campaign": active_campaign
     }
 
 
@@ -510,14 +559,16 @@ def submit_candidate_evaluation(
     }
 
 
-def get_detailed_results_by_category(conn: sqlite3.Connection) -> Dict[str, Any]:
+def get_detailed_results_by_category(conn: sqlite3.Connection, campaign_id: Optional[int] = None) -> Dict[str, Any]:
     """
     Retorna a matriz completa de notas para consulta do administrador:
-    - Candidatos e suas notas por categoria
+    - Candidatos e suas notas por categoria da campanha ativa
     - Detalhamento de notas por juiz
     - Médias consolidadas
     """
     cursor = conn.cursor()
+    if campaign_id is None:
+        campaign_id = get_active_campaign_id(conn)
 
     # Juízes
     cursor.execute("SELECT id, name, email FROM users WHERE role = 'JUDGE' AND active = 1 ORDER BY name ASC")
@@ -527,18 +578,23 @@ def get_detailed_results_by_category(conn: sqlite3.Connection) -> Dict[str, Any]
     cursor.execute("SELECT id, name, description FROM categories WHERE active = 1 ORDER BY display_order ASC, name ASC")
     categories = [dict(row) for row in cursor.fetchall()]
 
-    # Candidatos
-    cursor.execute("SELECT id, name, number, photo_url FROM candidates WHERE active = 1 ORDER BY number ASC, name ASC")
+    # Candidatos da campanha atual
+    cursor.execute("""
+        SELECT id, name, number, photo_url 
+        FROM candidates 
+        WHERE active = 1 AND campaign_id = ? 
+        ORDER BY CAST(number AS INTEGER) ASC, name ASC
+    """, (campaign_id,))
     candidates = [dict(row) for row in cursor.fetchall()]
 
-    # Todas as notas registradas
+    # Todas as notas registradas da campanha
     cursor.execute("""
         SELECT e.candidate_id, e.category_id, e.judge_id, e.score
         FROM evaluations e
         JOIN users u ON u.id = e.judge_id AND u.active = 1
-        JOIN candidates c ON c.id = e.candidate_id AND c.active = 1
+        JOIN candidates c ON c.id = e.candidate_id AND c.active = 1 AND c.campaign_id = ?
         JOIN categories cat ON cat.id = e.category_id AND cat.active = 1
-    """)
+    """, (campaign_id,))
     evaluations_raw = cursor.fetchall()
 
     eval_matrix: Dict[int, Dict[int, Dict[int, int]]] = {}
@@ -552,16 +608,17 @@ def get_detailed_results_by_category(conn: sqlite3.Connection) -> Dict[str, Any]
             eval_matrix[c_id][cat_id] = {}
         eval_matrix[c_id][cat_id][j_id] = r["score"]
 
-    # Progresso detalhado de cada juiz
+    # Progresso detalhado de cada juiz na campanha
     judge_progress = []
     total_candidates = len(candidates)
     for j in judges:
         j_id = j["id"]
         cursor.execute("""
-            SELECT COUNT(DISTINCT candidate_id)
-            FROM candidate_submissions
-            WHERE judge_id = ? AND status = 'COMPLETED'
-        """, (j_id,))
+            SELECT COUNT(DISTINCT cs.candidate_id)
+            FROM candidate_submissions cs
+            JOIN candidates c ON c.id = cs.candidate_id AND c.active = 1 AND c.campaign_id = ?
+            WHERE cs.judge_id = ? AND cs.status = 'COMPLETED'
+        """, (campaign_id, j_id))
         completed = cursor.fetchone()[0]
         pct = round((completed / total_candidates) * 100, 1) if total_candidates > 0 else 0.0
         judge_progress.append({

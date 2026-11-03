@@ -539,7 +539,113 @@ class TestCandidateEvaluationSystem(unittest.TestCase):
         self.assertEqual(status_del, 200)
         self.assertTrue(data_del.get("success"))
 
+    # -------------------------------------------------------------------------
+    # 15. Inscrição Sequencial Automática de Candidatos
+    # -------------------------------------------------------------------------
+    def test_candidate_sequential_numbering(self):
+        """Verifica que o número de inscrição é gerado automaticamente e é imutável."""
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+
+        # 4 candidatos já foram criados no seed com números "01", "02", "03", "04"
+        # O próximo candidato deve receber "05" automaticamente
+        status, _, data, _ = self.client.post("/api/admin/candidates", body={
+            "name": "Candidato Cinco",
+            "description": "Teste sequencial"
+        }, headers=headers)
+        self.assertEqual(status, 201)
+        self.assertEqual(data.get("number"), "05")
+        cand_id = data["id"]
+
+        # Tentar alterar o número via PUT não deve ter efeito
+        status_up, _, _, _ = self.client.put(f"/api/admin/candidates/{cand_id}", body={
+            "name": "Candidato Cinco Modificado",
+            "number": "999",  # Tentativa de burlar
+            "description": "Nova descrição"
+        }, headers=headers)
+        self.assertEqual(status_up, 200)
+
+        # Consultar lista e verificar que continua "05"
+        _, _, list_data, _ = self.client.get("/api/admin/candidates", headers=headers)
+        cand_found = next((c for c in list_data["candidates"] if c["id"] == cand_id), None)
+        self.assertIsNotNone(cand_found)
+        self.assertEqual(cand_found["number"], "05")
+        self.assertEqual(cand_found["name"], "Candidato Cinco Modificado")
+
+    # -------------------------------------------------------------------------
+    # 16. Importação em Lote via TXT
+    # -------------------------------------------------------------------------
+    def test_bulk_candidate_import(self):
+        """Testa importação em lote com atribuição sequencial de números."""
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+
+        # Importar lista de 3 candidatos
+        names = ["Aline Torres", "Bruno Covas", "Carla Dias"]
+        status, _, data, _ = self.client.post("/api/admin/candidates/bulk-import", body={
+            "names": names
+        }, headers=headers)
+        self.assertEqual(status, 201)
+        self.assertEqual(data["count"], 3)
+        self.assertEqual(len(data["candidates"]), 3)
+
+        # Também testa envio via texto quebrado por linhas
+        text_payload = "Danilo Gentili\nEduardo Kobra\n\nFabiana Karla\n"
+        status2, _, data2, _ = self.client.post("/api/admin/candidates/bulk-import", body={
+            "text": text_payload
+        }, headers=headers)
+        self.assertEqual(status2, 201)
+        self.assertEqual(data2["count"], 3)
+
+    # -------------------------------------------------------------------------
+    # 17. Campanhas de Votação e Limpeza de Candidatos da Campanha Atual
+    # -------------------------------------------------------------------------
+    def test_voting_campaigns_and_clear_candidates(self):
+        """Testa criação de nova campanha (do zero), alternância e limpeza de candidatos."""
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+
+        # 1. Listar campanhas atuais (campanha 1 existe)
+        status, _, camp_data, _ = self.client.get("/api/admin/campaigns", headers=headers)
+        self.assertEqual(status, 200)
+        self.assertEqual(camp_data["active_campaign_id"], 1)
+
+        # 2. Criar nova campanha
+        status_new, _, new_camp, _ = self.client.post("/api/admin/campaigns", body={
+            "name": "Etapa Regional 2026",
+            "description": "Segunda etapa eliminatória"
+        }, headers=headers)
+        self.assertEqual(status_new, 201)
+        new_camp_id = new_camp["id"]
+
+        # 3. Na nova campanha ativa, a lista de candidatos deve estar vazia (iniciar do zero)
+        _, _, cand_res, _ = self.client.get("/api/admin/candidates", headers=headers)
+        self.assertEqual(len(cand_res["candidates"]), 0)
+
+        # 4. Adicionar um candidato na nova campanha (deve começar no "01")
+        status_c, _, c_data, _ = self.client.post("/api/admin/candidates", body={
+            "name": "Primeiro Candidato Regional"
+        }, headers=headers)
+        self.assertEqual(status_c, 201)
+        self.assertEqual(c_data["number"], "01")
+
+        # 5. Limpar todos os candidatos da campanha atual
+        status_clear, _, clear_data, _ = self.client.delete("/api/admin/candidates/clear-current-campaign", headers=headers)
+        self.assertEqual(status_clear, 200)
+        self.assertEqual(clear_data["deleted_count"], 1)
+
+        # Verificar que a lista está vazia de novo
+        _, _, cand_empty, _ = self.client.get("/api/admin/candidates", headers=headers)
+        self.assertEqual(len(cand_empty["candidates"]), 0)
+
+        # 6. Reativar a primeira campanha (Campanha Principal)
+        status_act, _, act_data, _ = self.client.post("/api/admin/campaigns/1/activate", headers=headers)
+        self.assertEqual(status_act, 200)
+        self.assertEqual(act_data["active_campaign_id"], 1)
+
+        # Candidatos da campanha 1 continuam intactos
+        _, _, cand_orig, _ = self.client.get("/api/admin/candidates", headers=headers)
+        self.assertGreaterEqual(len(cand_orig["candidates"]), 4)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

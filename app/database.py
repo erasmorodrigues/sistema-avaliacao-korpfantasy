@@ -35,9 +35,20 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TEXT NOT NULL
 );
 
+-- Campanhas de votação (permite iniciar do zero e alternar eventos/etapas)
+CREATE TABLE IF NOT EXISTS campaigns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Candidatos cadastrados (sem login ou acesso ao sistema)
 CREATE TABLE IF NOT EXISTS candidates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id INTEGER NOT NULL DEFAULT 1 REFERENCES campaigns(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     number TEXT,
     photo_url TEXT,
@@ -119,10 +130,28 @@ def init_db(db_path: str = None):
         with conn:
             conn.executescript(SCHEMA_SQL)
             
-            # Inicializar configurações padrões se não existirem
             now = datetime.utcnow().isoformat()
+            
+            # Garantir migração da coluna campaign_id na tabela candidates
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(candidates)")
+            candidate_cols = [col[1] for col in cursor.fetchall()]
+            if "campaign_id" not in candidate_cols and "candidates" in [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]:
+                cursor.execute("ALTER TABLE candidates ADD COLUMN campaign_id INTEGER DEFAULT 1")
+                cursor.execute("UPDATE candidates SET campaign_id = 1 WHERE campaign_id IS NULL")
+
+            # Garantir existência da campanha padrão inicial
+            cursor.execute("SELECT COUNT(*) FROM campaigns")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("""
+                    INSERT INTO campaigns (id, name, description, status, created_at, updated_at)
+                    VALUES (1, 'Campanha Principal', 'Campanha de avaliação inicial', 'ACTIVE', ?, ?)
+                """, (now, now))
+
+            # Inicializar configurações padrões se não existirem
             default_settings = [
                 ("event_name", "Grande Festival de Talentos 2026", now),
+                ("active_campaign_id", "1", now),  # ID da campanha ativa
                 ("voting_status", "OPEN", now),  # OPEN, CLOSED, PAUSED
                 ("allow_corrections", "true", now),  # Permitir juiz alterar nota antes de encerrar
                 ("public_results_published", "false", now),  # Divulgar resultado oficial
@@ -204,8 +233,8 @@ def seed_default_data(db_path: str = None, force: bool = False):
                 ]
                 for name, num, desc in candidates:
                     cursor.execute("""
-                        INSERT INTO candidates (name, number, photo_url, description, active, created_at, updated_at)
-                        VALUES (?, ?, '', ?, 1, ?, ?)
+                        INSERT INTO candidates (name, number, photo_url, description, active, campaign_id, created_at, updated_at)
+                        VALUES (?, ?, '', ?, 1, 1, ?, ?)
                     """, (name, num, desc, now, now))
 
             # Registrar log de auditoria do seed

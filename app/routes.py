@@ -26,7 +26,9 @@ from app.services import (
     delete_candidate_safe,
     delete_judge_safe,
     update_setting,
-    log_audit
+    log_audit,
+    get_active_campaign_id,
+    get_active_campaign
 )
 
 
@@ -449,6 +451,8 @@ router.add("PUT", "/api/admin/settings", handle_admin_settings_update)
 
 # --- CRUD Candidatos ---
 
+# --- CRUD Candidatos ---
+
 def handle_admin_candidates_list(req: Request):
     auth_err = require_role(req, ["ADMIN"])
     if auth_err:
@@ -456,10 +460,21 @@ def handle_admin_candidates_list(req: Request):
 
     conn = get_db_connection()
     try:
+        active_camp_id = get_active_campaign_id(conn)
+        active_camp = get_active_campaign(conn)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, number, photo_url, description, active, created_at FROM candidates ORDER BY id DESC")
+        cursor.execute("""
+            SELECT id, name, number, photo_url, description, active, campaign_id, created_at 
+            FROM candidates 
+            WHERE campaign_id = ?
+            ORDER BY CAST(number AS INTEGER) ASC, id ASC
+        """, (active_camp_id,))
         candidates = [dict(row) for row in cursor.fetchall()]
-        return json_response({"success": True, "candidates": candidates})
+        return json_response({
+            "success": True, 
+            "candidates": candidates,
+            "active_campaign": active_camp
+        })
     finally:
         conn.close()
 
@@ -471,10 +486,8 @@ def handle_admin_candidates_create(req: Request):
     if auth_err:
         return auth_err
 
-    data = req.json
+    data = req.json or {}
     name = str(data.get("name", "")).strip()
-    number = str(data.get("number", "")).strip()
-    photo_url = str(data.get("photo_url", "")).strip()
     description = str(data.get("description", "")).strip()
 
     if not name:
@@ -484,19 +497,145 @@ def handle_admin_candidates_create(req: Request):
     conn = get_db_connection()
     try:
         with conn:
+            campaign_id = get_active_campaign_id(conn)
             cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO candidates (name, number, photo_url, description, active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 1, ?, ?)
-            """, (name, number, photo_url, description, now, now))
-            new_id = cursor.lastrowid
-            log_audit(conn, req.user["sub"], req.user.get("name"), "CREATE_CANDIDATE", f"Candidato '{name}' (ID {new_id}) cadastrado.", req.ip_address)
+            # Próximo número sequencial dentro da campanha atual
+            cursor.execute("SELECT COALESCE(MAX(CAST(number AS INTEGER)), 0) + 1 FROM candidates WHERE campaign_id = ?", (campaign_id,))
+            next_num = cursor.fetchone()[0]
+            number = f"{next_num:02d}"
 
-        return json_response({"success": True, "id": new_id, "message": "Candidato cadastrado com sucesso."}, status=201)
+            cursor.execute("""
+                INSERT INTO candidates (name, number, photo_url, description, active, campaign_id, created_at, updated_at)
+                VALUES (?, ?, '', ?, 1, ?, ?, ?)
+            """, (name, number, description, campaign_id, now, now))
+            new_id = cursor.lastrowid
+            log_audit(
+                conn, 
+                req.user["sub"], 
+                req.user.get("name"), 
+                "CREATE_CANDIDATE", 
+                f"Candidato '{name}' (Nº {number}, ID {new_id}) cadastrado na campanha ID {campaign_id}.", 
+                req.ip_address
+            )
+
+        return json_response({
+            "success": True, 
+            "id": new_id, 
+            "number": number, 
+            "message": "Candidato cadastrado com sucesso."
+        }, status=201)
     finally:
         conn.close()
 
 router.add("POST", "/api/admin/candidates", handle_admin_candidates_create)
+
+
+def handle_admin_candidates_bulk_import(req: Request):
+    """
+    Importação de candidatos em lote via texto/arquivo txt.
+    Cada linha não-vazia representa um candidato.
+    O número de inscrição é atribuído sequencialmente.
+    """
+    auth_err = require_role(req, ["ADMIN"])
+    if auth_err:
+        return auth_err
+
+    data = req.json or {}
+    raw_names = data.get("names")
+    if raw_names is None:
+        raw_text = data.get("text") or data.get("content") or ""
+        raw_names = raw_text.splitlines()
+
+    if not isinstance(raw_names, list):
+        return error_response("Formato inválido. Envie um arquivo txt ou lista de nomes.", status=400)
+
+    names = [str(n).strip() for n in raw_names if str(n).strip()]
+
+    if not names:
+        return error_response("Nenhum nome de candidato válido foi informado no arquivo.", status=400)
+
+    now = datetime.utcnow().isoformat()
+    conn = get_db_connection()
+    try:
+        with conn:
+            campaign_id = get_active_campaign_id(conn)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COALESCE(MAX(CAST(number AS INTEGER)), 0) + 1 FROM candidates WHERE campaign_id = ?", (campaign_id,))
+            next_num = cursor.fetchone()[0]
+
+            inserted = []
+            for name in names:
+                number = f"{next_num:02d}"
+                cursor.execute("""
+                    INSERT INTO candidates (name, number, photo_url, description, active, campaign_id, created_at, updated_at)
+                    VALUES (?, ?, '', '', 1, ?, ?, ?)
+                """, (name, number, campaign_id, now, now))
+                inserted.append({"id": cursor.lastrowid, "name": name, "number": number})
+                next_num += 1
+
+            log_audit(
+                conn, 
+                req.user["sub"], 
+                req.user.get("name"), 
+                "BULK_IMPORT_CANDIDATES", 
+                f"Importação em lote de {len(inserted)} candidatos na campanha ID {campaign_id}.", 
+                req.ip_address
+            )
+
+        return json_response({
+            "success": True,
+            "count": len(inserted),
+            "candidates": inserted,
+            "message": f"{len(inserted)} candidato(s) importado(s) com sucesso com números sequenciais atribuídos!"
+        }, status=201)
+    finally:
+        conn.close()
+
+router.add("POST", "/api/admin/candidates/bulk-import", handle_admin_candidates_bulk_import)
+
+
+def handle_admin_candidates_clear_campaign(req: Request):
+    """
+    Exclui todos os candidatos e todas as avaliações associadas da campanha ativa atual.
+    """
+    auth_err = require_role(req, ["ADMIN"])
+    if auth_err:
+        return auth_err
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            campaign_id = get_active_campaign_id(conn)
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM candidates WHERE campaign_id = ?", (campaign_id,))
+            candidate_ids = [row[0] for row in cursor.fetchall()]
+            count = len(candidate_ids)
+
+            if count > 0:
+                placeholders = ",".join("?" * count)
+                conn.execute(f"DELETE FROM evaluations WHERE candidate_id IN ({placeholders})", candidate_ids)
+                conn.execute(f"DELETE FROM candidate_submissions WHERE candidate_id IN ({placeholders})", candidate_ids)
+                conn.execute("DELETE FROM candidates WHERE campaign_id = ?", (campaign_id,))
+
+            log_audit(
+                conn,
+                req.user["sub"],
+                req.user.get("name"),
+                "CLEAR_CAMPAIGN_CANDIDATES",
+                f"Exclusão em massa: {count} candidatos e todas as avaliações da campanha ID {campaign_id} foram removidos.",
+                req.ip_address
+            )
+
+        return json_response({
+            "success": True,
+            "deleted_count": count,
+            "message": f"Todos os {count} candidatos e notas da campanha atual foram removidos com sucesso."
+        })
+    finally:
+        conn.close()
+
+router.add("DELETE", "/api/admin/candidates/clear-current-campaign", handle_admin_candidates_clear_campaign)
+router.add("DELETE", "/api/admin/candidates/clear-all", handle_admin_candidates_clear_campaign)
 
 
 def handle_admin_candidates_update(req: Request, candidate_id: int):
@@ -504,10 +643,8 @@ def handle_admin_candidates_update(req: Request, candidate_id: int):
     if auth_err:
         return auth_err
 
-    data = req.json
+    data = req.json or {}
     name = str(data.get("name", "")).strip()
-    number = str(data.get("number", "")).strip()
-    photo_url = str(data.get("photo_url", "")).strip()
     description = str(data.get("description", "")).strip()
     active = int(data.get("active", 1))
 
@@ -519,11 +656,12 @@ def handle_admin_candidates_update(req: Request, candidate_id: int):
     try:
         with conn:
             cursor = conn.cursor()
+            # Nota: O número de inscrição não é alterado (imutável)
             cursor.execute("""
                 UPDATE candidates
-                SET name = ?, number = ?, photo_url = ?, description = ?, active = ?, updated_at = ?
+                SET name = ?, description = ?, active = ?, updated_at = ?
                 WHERE id = ?
-            """, (name, number, photo_url, description, active, now, candidate_id))
+            """, (name, description, active, now, candidate_id))
             if cursor.rowcount == 0:
                 return error_response("Candidato não encontrado.", status=404)
             log_audit(conn, req.user["sub"], req.user.get("name"), "UPDATE_CANDIDATE", f"Candidato ID {candidate_id} atualizado.", req.ip_address)
@@ -550,6 +688,118 @@ def handle_admin_candidates_delete(req: Request, candidate_id: int):
         conn.close()
 
 router.add("DELETE", "/api/admin/candidates/<int:candidate_id>", handle_admin_candidates_delete)
+
+
+# --- Gerenciamento de Campanhas de Votação ---
+
+def handle_admin_campaigns_list(req: Request):
+    auth_err = require_role(req, ["ADMIN"])
+    if auth_err:
+        return auth_err
+
+    conn = get_db_connection()
+    try:
+        active_camp_id = get_active_campaign_id(conn)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT c.id, c.name, c.description, c.status, c.created_at,
+                   (SELECT COUNT(*) FROM candidates cand WHERE cand.campaign_id = c.id) as candidates_count
+            FROM campaigns c
+            ORDER BY c.id DESC
+        """)
+        campaigns = [dict(row) for row in cursor.fetchall()]
+        return json_response({
+            "success": True,
+            "active_campaign_id": active_camp_id,
+            "campaigns": campaigns
+        })
+    finally:
+        conn.close()
+
+router.add("GET", "/api/admin/campaigns", handle_admin_campaigns_list)
+
+
+def handle_admin_campaigns_create(req: Request):
+    auth_err = require_role(req, ["ADMIN"])
+    if auth_err:
+        return auth_err
+
+    data = req.json or {}
+    name = str(data.get("name", "")).strip()
+    description = str(data.get("description", "")).strip()
+
+    if not name:
+        return error_response("O nome da campanha é obrigatório.", status=400)
+
+    now = datetime.utcnow().isoformat()
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO campaigns (name, description, status, created_at, updated_at)
+                VALUES (?, ?, 'ACTIVE', ?, ?)
+            """, (name, description, now, now))
+            new_id = cursor.lastrowid
+
+            # Definir imediatamente como campanha ativa
+            update_setting(conn, "active_campaign_id", str(new_id), req.user["sub"], req.user.get("name"))
+
+            log_audit(
+                conn,
+                req.user["sub"],
+                req.user.get("name"),
+                "CREATE_CAMPAIGN",
+                f"Nova campanha '{name}' (ID {new_id}) criada e ativada. Votação iniciada do zero.",
+                req.ip_address
+            )
+
+        return json_response({
+            "success": True,
+            "id": new_id,
+            "name": name,
+            "message": f"Nova campanha '{name}' criada e ativada com sucesso! As votações agora iniciam do zero para esta campanha."
+        }, status=201)
+    finally:
+        conn.close()
+
+router.add("POST", "/api/admin/campaigns", handle_admin_campaigns_create)
+
+
+def handle_admin_campaigns_activate(req: Request, campaign_id: int):
+    auth_err = require_role(req, ["ADMIN"])
+    if auth_err:
+        return auth_err
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name FROM campaigns WHERE id = ?", (campaign_id,))
+        camp = cursor.fetchone()
+        if not camp:
+            return error_response("Campanha não encontrada.", status=404)
+
+        camp_name = camp["name"]
+        with conn:
+            update_setting(conn, "active_campaign_id", str(campaign_id), req.user["sub"], req.user.get("name"))
+            log_audit(
+                conn,
+                req.user["sub"],
+                req.user.get("name"),
+                "ACTIVATE_CAMPAIGN",
+                f"Campanha '{camp_name}' (ID {campaign_id}) definida como ativa.",
+                req.ip_address
+            )
+
+        return json_response({
+            "success": True,
+            "active_campaign_id": campaign_id,
+            "message": f"Campanha '{camp_name}' agora é a campanha ativa."
+        })
+    finally:
+        conn.close()
+
+router.add("POST", "/api/admin/campaigns/<int:campaign_id>/activate", handle_admin_campaigns_activate)
 
 
 # --- CRUD Juízes ---
