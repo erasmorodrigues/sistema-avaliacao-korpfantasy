@@ -644,6 +644,68 @@ class TestCandidateEvaluationSystem(unittest.TestCase):
         _, _, cand_orig, _ = self.client.get("/api/admin/candidates", headers=headers)
         self.assertGreaterEqual(len(cand_orig["candidates"]), 4)
 
+    # -------------------------------------------------------------------------
+    # 19. Segurança da Rota Pública e Reset de Senha de Juiz pelo Admin
+    # -------------------------------------------------------------------------
+    def test_judge_password_reset_and_public_info_security(self):
+        """
+        Garante que:
+        1. /api/public/info não vaze lista de usuários ou credenciais.
+        2. Apenas administradores consigam redefinir a senha de juízes.
+        3. O juiz consiga se autenticar com a nova senha redefinida.
+        4. A lista administrativa de juízes não exponha hash ou senhas em texto plano.
+        """
+        # 1. Rota pública não deve conter campo 'users'
+        status_pub, _, pub_data, _ = self.client.get("/api/public/info")
+        self.assertEqual(status_pub, 200)
+        self.assertNotIn("users", pub_data)
+
+        admin_headers = {"Authorization": f"Bearer {self.admin_token}"}
+        judge_headers = {"Authorization": f"Bearer {self.judge_token}"}
+
+        # 2. Listagem de juízes pelo admin não expõe senha
+        status_j, _, j_data, _ = self.client.get("/api/admin/judges", headers=admin_headers)
+        self.assertEqual(status_j, 200)
+        for judge in j_data["judges"]:
+            self.assertNotIn("password", judge)
+            self.assertNotIn("password_hash", judge)
+            self.assertIn("name", judge)
+            self.assertIn("email", judge)
+
+        # 3. Juiz tentando redefinir senha de outro juiz deve receber 403 Forbidden
+        status_denied, _, _, _ = self.client.post("/api/admin/judges/2/reset-password", body={
+            "password": "tentativa_juiz"
+        }, headers=judge_headers)
+        self.assertEqual(status_denied, 403)
+
+        # 4. Admin redefine a senha do primeiro juiz da lista
+        target_judge = j_data["judges"][0]
+        judge_id = target_judge["id"]
+        judge_email = target_judge["email"]
+        nova_senha = "NovaSenha@2026"
+
+        status_reset, _, reset_data, _ = self.client.post(f"/api/admin/judges/{judge_id}/reset-password", body={
+            "password": nova_senha
+        }, headers=admin_headers)
+        self.assertEqual(status_reset, 200)
+        self.assertTrue(reset_data.get("success"))
+
+        # 5. Juiz faz login com a nova senha
+        status_login, _, login_data, _ = self.client.post("/api/auth/login", body={
+            "email": judge_email,
+            "password": nova_senha
+        })
+        self.assertEqual(status_login, 200)
+        self.assertTrue(login_data.get("success"))
+        self.assertIn("token", login_data)
+
+        # Antiga senha não deve mais funcionar
+        status_old, _, _, _ = self.client.post("/api/auth/login", body={
+            "email": judge_email,
+            "password": "juiz123"
+        })
+        self.assertEqual(status_old, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

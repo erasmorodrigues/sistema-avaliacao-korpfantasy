@@ -177,7 +177,6 @@
     const publicInfo = await apiRequest("/api/public/info");
     if (publicInfo.success) {
       state.eventInfo = publicInfo;
-      renderQuickLoginButtons(publicInfo.users || []);
     }
 
     if (!state.token) {
@@ -211,38 +210,6 @@
     }
   }
 
-  function renderQuickLoginButtons(users) {
-    const container = document.getElementById("loginQuickDemoButtons");
-    if (!container) return;
-    container.innerHTML = "";
-
-    if (!users || users.length === 0) {
-      container.innerHTML = `<span style="font-size:0.8rem; color:var(--slate-400);">Nenhum usuário cadastrado.</span>`;
-      return;
-    }
-
-    // Ordenar: ADMIN sempre em primeiro, depois juízes
-    const sorted = [...users].sort((a, b) => {
-      if (a.role === "ADMIN" && b.role !== "ADMIN") return -1;
-      if (a.role !== "ADMIN" && b.role === "ADMIN") return 1;
-      return a.name.localeCompare(b.name);
-    });
-
-    sorted.forEach(u => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn btn-xs btn-outline";
-      const icon = u.role === "ADMIN" ? "🛡️" : "⚖️";
-      btn.innerHTML = `${icon} <strong>${u.name}</strong> (${u.role === "ADMIN" ? "Admin" : "Juiz"})`;
-      btn.title = `E-mail: ${u.email}`;
-      btn.addEventListener("click", () => {
-        const defaultPwd = u.role === "ADMIN" ? "admin123" : "juiz123";
-        window.quickFillLogin(u.email, defaultPwd);
-      });
-      container.appendChild(btn);
-    });
-  }
-
   async function handleLoginSubmit(e) {
     e.preventDefault();
     const email = document.getElementById("loginEmail").value.trim();
@@ -270,12 +237,6 @@
       showToast(res.error || "Credenciais inválidas.", "error");
     }
   }
-
-  window.quickFillLogin = function (email, password) {
-    document.getElementById("loginEmail").value = email;
-    document.getElementById("loginPassword").value = password;
-    document.getElementById("formLogin").dispatchEvent(new Event("submit"));
-  };
 
   function logout() {
     state.token = null;
@@ -949,14 +910,16 @@
 
     state.admin.judges.forEach(j => {
       const tr = document.createElement("tr");
+      const judgeJson = JSON.stringify(j).replace(/'/g, "&#39;");
       tr.innerHTML = `
         <td><strong>${j.name}</strong></td>
         <td>${j.email}</td>
         <td><span class="badge ${j.active ? 'badge-emerald' : 'badge-slate'}">${j.active ? 'Ativo' : 'Inativo'}</span></td>
         <td>${new Date(j.created_at).toLocaleDateString("pt-BR")}</td>
         <td>
-          <div style="display:flex; gap:0.5rem;">
-            <button class="btn btn-xs btn-outline" onclick='window.editJudge(${JSON.stringify(j)})'>Editar</button>
+          <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <button class="btn btn-xs btn-outline" onclick='window.editJudge(${judgeJson})'>Editar</button>
+            <button class="btn btn-xs btn-outline" onclick='window.openResetJudgePasswordModal(${judgeJson})' title="Definir nova senha para este juiz">🔑 Resetar Senha</button>
             <button class="btn btn-xs btn-danger" onclick="window.deleteJudge(${j.id}, '${j.name.replace(/'/g, "\\'")}')">Excluir</button>
           </div>
         </td>
@@ -964,6 +927,50 @@
       tbody.appendChild(tr);
     });
   }
+
+  window.openResetJudgePasswordModal = function (judge) {
+    document.getElementById("resetJudgeId").value = judge.id;
+    document.getElementById("resetJudgeName").textContent = judge.name;
+    document.getElementById("resetJudgeEmail").textContent = judge.email;
+    document.getElementById("resetJudgeNewPassword").value = "";
+    document.getElementById("modalResetJudgePassword").classList.add("active");
+  };
+
+  window.closeResetJudgePasswordModal = function () {
+    document.getElementById("modalResetJudgePassword").classList.remove("active");
+  };
+
+  window.generateRandomJudgePassword = function () {
+    const chars = "abcdefghjkmnpqrstuvwxyz23456789";
+    let pwd = "juiz@";
+    for (let i = 0; i < 4; i++) {
+      pwd += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    document.getElementById("resetJudgeNewPassword").value = pwd;
+  };
+
+  window.handleResetJudgePasswordSubmit = async function (e) {
+    e.preventDefault();
+    const id = document.getElementById("resetJudgeId").value;
+    const password = document.getElementById("resetJudgeNewPassword").value.trim();
+
+    if (!password) {
+      showToast("Por favor, digite a nova senha.", "error");
+      return;
+    }
+
+    const res = await apiRequest(`/api/admin/judges/${id}/reset-password`, {
+      method: "POST",
+      body: { password }
+    });
+
+    if (res.success) {
+      showToast(res.message || "Senha redefinida com sucesso!", "success");
+      closeResetJudgePasswordModal();
+    } else {
+      showToast(res.error || "Erro ao redefinir senha.", "error");
+    }
+  };
 
   window.openJudgeModal = function () {
     document.getElementById("modalJudgeTitle").textContent = "Novo Juiz";

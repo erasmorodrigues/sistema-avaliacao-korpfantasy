@@ -73,7 +73,7 @@
 
           <form id="formLogin" class="form-vertical">
             <div class="form-group">
-              <label for="loginEmail">E-mail</label>
+              <label for="loginEmail">Login (E-mail)</label>
               <input type="email" id="loginEmail" class="form-input" placeholder="seu.email@exemplo.com" required autocomplete="username">
             </div>
 
@@ -90,14 +90,6 @@
               </svg>
             </button>
           </form>
-
-          <!-- Usuários Cadastrados para Acesso Rápido -->
-          <div class="login-quick-demo">
-            <span class="quick-demo-title">Usuários Cadastrados para Acesso:</span>
-            <div class="quick-demo-buttons" id="loginQuickDemoButtons">
-              <!-- Preenchido dinamicamente via JS com Admin sempre em 1º e todos os juízes -->
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -772,6 +764,38 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" onclick="window.closeJudgeModal()">Cancelar</button>
           <button type="submit" class="btn btn-primary">Salvar Juiz</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: RESETAR SENHA DO JUIZ (ADMIN) -->
+  <div class="modal" id="modalResetJudgePassword">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>Resetar Senha do Juiz</h3>
+        <button class="btn-close" onclick="window.closeResetJudgePasswordModal()">&times;</button>
+      </div>
+      <form id="formResetJudgePassword" onsubmit="window.handleResetJudgePasswordSubmit(event)">
+        <input type="hidden" id="resetJudgeId">
+        <div class="modal-body">
+          <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 1rem;">
+            Defina uma nova senha temporária ou padrão para o juiz <strong id="resetJudgeName">-</strong> (<span id="resetJudgeEmail">-</span>). A senha atual não é exibida por motivos de segurança.
+          </p>
+          <div class="form-group">
+            <label for="resetJudgeNewPassword">Nova Senha *</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="resetJudgeNewPassword" class="form-input" required placeholder="Digite a nova senha temporária" autocomplete="new-password">
+              <button type="button" class="btn btn-outline btn-sm" onclick="window.generateRandomJudgePassword()" style="white-space: nowrap;">Gerar Senha</button>
+            </div>
+            <span class="form-hint" style="margin-top: 0.35rem; display: block; font-size: 0.8rem; color: var(--text-muted);">
+              Informe esta nova senha ao juiz para que ele realize o login.
+            </span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" onclick="window.closeResetJudgePasswordModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Confirmar Nova Senha</button>
         </div>
       </form>
     </div>
