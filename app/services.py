@@ -4,13 +4,13 @@ Contém a lógica de cálculo de médias, rankings, empates, estatísticas e val
 """
 
 import sqlite3
-from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
+from app.database import get_brasilia_now_iso
 
 
 def log_audit(conn: sqlite3.Connection, user_id: Optional[int], user_name: Optional[str], action: str, details: str, ip_address: str = "127.0.0.1"):
     """Registra uma ação no log de auditoria."""
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn.execute("""
         INSERT INTO audit_logs (user_id, user_name, action, details, ip_address, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -35,7 +35,7 @@ def get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:
 
 def update_setting(conn: sqlite3.Connection, key: str, value: str, user_id: Optional[int] = None, user_name: Optional[str] = None):
     """Atualiza uma configuração e registra no log de auditoria."""
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     with conn:
         conn.execute("""
             INSERT INTO settings (key, value, updated_at)
@@ -520,7 +520,7 @@ def submit_candidate_evaluation(
         scores_int_map[cat_id] = score_val
 
     # Persistir no banco de dados dentro de transação atômica
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     with conn:
         for cat_id, score_val in scores_int_map.items():
             conn.execute("""
@@ -659,7 +659,7 @@ def delete_category_safe(conn: sqlite3.Connection, category_id: int, user_id: in
     with conn:
         if eval_count > 0:
             # Desativar para manter integridade
-            conn.execute("UPDATE categories SET active = 0, updated_at = ? WHERE id = ?", (datetime.utcnow().isoformat(), category_id))
+            conn.execute("UPDATE categories SET active = 0, updated_at = ? WHERE id = ?", (get_brasilia_now_iso(), category_id))
             log_audit(conn, user_id, user_name, "DEACTIVATE_CATEGORY", f"Categoria '{cat_name}' (ID {category_id}) desativada pois possui {eval_count} notas registradas.")
             return True, f"A categoria '{cat_name}' possui avaliações registradas e foi desativada para preservar a integridade dos resultados."
         else:
@@ -678,7 +678,7 @@ def delete_candidate_safe(conn: sqlite3.Connection, candidate_id: int, user_id: 
         return False, "Candidato não encontrado."
 
     cand_name = cand["name"]
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     with conn:
         # Excluir candidato e avaliações relacionadas em cascata
         conn.execute("DELETE FROM evaluations WHERE candidate_id = ?", (candidate_id,))

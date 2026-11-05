@@ -7,6 +7,18 @@ import sqlite3
 import os
 from datetime import datetime
 
+try:
+    import zoneinfo
+    TZ_BRASILIA = zoneinfo.ZoneInfo("America/Sao_Paulo")
+except Exception:
+    from datetime import timezone, timedelta
+    TZ_BRASILIA = timezone(timedelta(hours=-3))
+
+
+def get_brasilia_now_iso() -> str:
+    """Retorna data/hora atual no fuso horário de Brasília (UTC-3) em formato ISO 8601."""
+    return datetime.now(TZ_BRASILIA).isoformat()
+
 DEFAULT_DB_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "sistema_avaliacao.db"
@@ -130,7 +142,7 @@ def init_db(db_path: str = None):
         with conn:
             conn.executescript(SCHEMA_SQL)
             
-            now = datetime.utcnow().isoformat()
+            now = get_brasilia_now_iso()
             
             # Garantir migração da coluna campaign_id na tabela candidates
             cursor = conn.cursor()
@@ -186,7 +198,7 @@ def seed_default_data(db_path: str = None, force: bool = False):
             if user_count > 0 and not force:
                 return  # Já possui usuários, não sobrescrever
 
-            now = datetime.utcnow().isoformat()
+            now = get_brasilia_now_iso()
 
             # 1. Administrador padrão
             admin_pwd = hash_password("admin123")

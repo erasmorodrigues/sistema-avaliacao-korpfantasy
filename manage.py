@@ -18,7 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-from app.database import get_db_connection, init_db, seed_default_data, DEFAULT_DB_PATH
+from app.database import get_db_connection, init_db, seed_default_data, DEFAULT_DB_PATH, get_brasilia_now_iso
 from app.auth import hash_password
 
 
@@ -40,7 +40,7 @@ def cmd_createadmin(args):
 
     init_db()
     pwd_hash = hash_password(password)
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
 
     conn = get_db_connection()
     try:
@@ -71,7 +71,7 @@ def cmd_createjudge(args):
 
     init_db()
     pwd_hash = hash_password(password)
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
 
     conn = get_db_connection()
     try:

@@ -8,7 +8,7 @@ import re
 from typing import Dict, Any, Tuple, Optional, List
 from datetime import datetime
 
-from app.database import get_db_connection
+from app.database import get_db_connection, get_brasilia_now_iso
 from app.auth import (
     verify_password,
     hash_password,
@@ -239,23 +239,11 @@ def handle_public_info(req: Request):
     conn = get_db_connection()
     try:
         settings = get_all_settings(conn)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT id, name, email, role 
-            FROM users 
-            WHERE active = 1 
-            ORDER BY 
-                CASE WHEN role = 'ADMIN' THEN 0 ELSE 1 END,
-                name ASC
-        """)
-        demo_users = [dict(r) for r in cursor.fetchall()]
-
         return json_response({
             "success": True,
             "event_name": settings.get("event_name", "Sistema de Avaliação"),
             "voting_status": settings.get("voting_status", "OPEN"),
-            "public_results_published": settings.get("public_results_published", "false").lower() == "true",
-            "users": demo_users
+            "public_results_published": settings.get("public_results_published", "false").lower() == "true"
         })
     finally:
         conn.close()
@@ -493,7 +481,7 @@ def handle_admin_candidates_create(req: Request):
     if not name:
         return error_response("O nome do candidato é obrigatório.", status=400)
 
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn = get_db_connection()
     try:
         with conn:
@@ -554,7 +542,7 @@ def handle_admin_candidates_bulk_import(req: Request):
     if not names:
         return error_response("Nenhum nome de candidato válido foi informado no arquivo.", status=400)
 
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn = get_db_connection()
     try:
         with conn:
@@ -651,7 +639,7 @@ def handle_admin_candidates_update(req: Request, candidate_id: int):
     if not name:
         return error_response("O nome do candidato é obrigatório.", status=400)
 
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn = get_db_connection()
     try:
         with conn:
@@ -731,7 +719,7 @@ def handle_admin_campaigns_create(req: Request):
     if not name:
         return error_response("O nome da campanha é obrigatório.", status=400)
 
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn = get_db_connection()
     try:
         with conn:
@@ -835,7 +823,7 @@ def handle_admin_judges_create(req: Request):
         return error_response("Nome, e-mail e senha são obrigatórios.", status=400)
 
     pwd_hash = hash_password(password)
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn = get_db_connection()
     try:
         with conn:
@@ -872,7 +860,7 @@ def handle_admin_judges_update(req: Request, judge_id: int):
     if not name or not email:
         return error_response("Nome e e-mail são obrigatórios.", status=400)
 
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn = get_db_connection()
     try:
         with conn:
@@ -904,6 +892,58 @@ def handle_admin_judges_update(req: Request, judge_id: int):
         conn.close()
 
 router.add("PUT", "/api/admin/judges/<int:judge_id>", handle_admin_judges_update)
+
+
+def handle_admin_judges_reset_password(req: Request, judge_id: int):
+    """Permite ao administrador redefinir a senha de qualquer juiz cadastrado."""
+    auth_err = require_role(req, ["ADMIN"])
+    if auth_err:
+        return auth_err
+
+    data = req.json or {}
+    new_password = str(data.get("password", "")).strip()
+
+    if not new_password:
+        return error_response("Informe a nova senha para o juiz.", status=400)
+
+    if len(new_password) < 4:
+        return error_response("A senha deve ter no mínimo 4 caracteres.", status=400)
+
+    pwd_hash = hash_password(new_password)
+    now = get_brasilia_now_iso()
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, email FROM users WHERE id = ? AND role = 'JUDGE'", (judge_id,))
+            judge = cursor.fetchone()
+            if not judge:
+                return error_response("Juiz não encontrado.", status=404)
+
+            cursor.execute("""
+                UPDATE users
+                SET password_hash = ?, updated_at = ?
+                WHERE id = ? AND role = 'JUDGE'
+            """, (pwd_hash, now, judge_id))
+
+            log_audit(
+                conn,
+                req.user["sub"],
+                req.user.get("name"),
+                "RESET_JUDGE_PASSWORD",
+                f"Senha do juiz '{judge['name']}' (ID {judge_id}, email {judge['email']}) foi redefinida pelo administrador.",
+                req.ip_address
+            )
+
+        return json_response({
+            "success": True,
+            "message": f"Senha do juiz '{judge['name']}' redefinida com sucesso."
+        })
+    finally:
+        conn.close()
+
+router.add("POST", "/api/admin/judges/<int:judge_id>/reset-password", handle_admin_judges_reset_password)
 
 
 def handle_admin_judges_delete(req: Request, judge_id: int):
@@ -955,7 +995,7 @@ def handle_admin_categories_create(req: Request):
     if not name:
         return error_response("O nome da categoria é obrigatório.", status=400)
 
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn = get_db_connection()
     try:
         with conn:
@@ -988,7 +1028,7 @@ def handle_admin_categories_update(req: Request, category_id: int):
     if not name:
         return error_response("O nome da categoria é obrigatório.", status=400)
 
-    now = datetime.utcnow().isoformat()
+    now = get_brasilia_now_iso()
     conn = get_db_connection()
     try:
         with conn:
