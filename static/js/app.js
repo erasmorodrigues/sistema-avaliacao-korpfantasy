@@ -1697,6 +1697,54 @@
   }
 
   // =========================================================================
+  // Controle de Identidade Visual e Tema Korporate (Light / Dark)
+  // =========================================================================
+
+  function getActiveTheme() {
+    return document.documentElement.getAttribute("data-theme") || localStorage.getItem("kor_theme") || "light";
+  }
+
+  function applyTheme(theme) {
+    const validTheme = theme === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", validTheme);
+    localStorage.setItem("kor_theme", validTheme);
+
+    const isDark = validTheme === "dark";
+
+    // Atualiza botão do Header
+    const headerIcon = document.getElementById("themeToggleIconHeader");
+    const headerBtn = document.getElementById("btnThemeToggleHeader");
+    if (headerIcon) {
+      headerIcon.textContent = isDark ? "☀️" : "🌙";
+    }
+    if (headerBtn) {
+      headerBtn.setAttribute("title", isDark ? "Mudar para Modo Claro" : "Mudar para Modo Escuro");
+    }
+
+    // Atualiza botão do Card de Controle de Eventos
+    const cardIcon = document.getElementById("themeToggleCardIcon");
+    const cardText = document.getElementById("themeToggleCardText");
+    if (cardIcon) {
+      cardIcon.textContent = isDark ? "☀️" : "🌙";
+    }
+    if (cardText) {
+      cardText.textContent = isDark ? "Alternar para Modo Claro" : "Alternar para Modo Escuro";
+    }
+  }
+
+  function toggleTheme() {
+    const current = getActiveTheme();
+    const next = current === "dark" ? "light" : "dark";
+    applyTheme(next);
+    showToast(next === "dark" ? "Modo Escuro Korporate ativado." : "Modo Claro Korporate ativado.", "info");
+  }
+
+  function resetThemeDefault() {
+    applyTheme("light");
+    showToast("Identidade visual padrão restaurada com sucesso.", "success");
+  }
+
+  // =========================================================================
   // Inicialização e Event Listeners
   // =========================================================================
 
@@ -1754,6 +1802,12 @@
     window.loadAdminRankings = loadAdminRankings;
     window.renewSession = renewSession;
     window.closeSessionTimeoutModal = closeSessionTimeoutModal;
+    window.toggleTheme = toggleTheme;
+    window.resetThemeDefault = resetThemeDefault;
+    window.applyTheme = applyTheme;
+
+    // Inicializar tema Korporate
+    applyTheme(localStorage.getItem("kor_theme") || "light");
 
     // Inicializar gerenciamento centralizado de sessão e inatividade
     initSessionManager();
