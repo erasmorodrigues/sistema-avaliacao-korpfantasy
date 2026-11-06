@@ -115,12 +115,25 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at TEXT NOT NULL
 );
 
+-- Sessões de usuários com controle de inatividade e expiração máxima
+CREATE TABLE IF NOT EXISTS user_sessions (
+    session_id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    last_activity INTEGER NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    ip_address TEXT,
+    user_agent TEXT
+);
+
 -- Índices para otimização de consultas frequentes
 CREATE INDEX IF NOT EXISTS idx_evaluations_candidate ON evaluations(candidate_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_judge ON evaluations(judge_id);
 CREATE INDEX IF NOT EXISTS idx_evaluations_category ON evaluations(category_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_judge ON candidate_submissions(judge_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_status ON candidate_submissions(status);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_sessions_active ON user_sessions(is_active);
 """
 
 

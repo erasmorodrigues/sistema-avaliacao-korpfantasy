@@ -13,7 +13,15 @@ from app.auth import (
     verify_password,
     hash_password,
     create_access_token,
-    verify_access_token
+    verify_access_token,
+    create_user_session,
+    get_user_session,
+    update_user_session_activity,
+    invalidate_user_session,
+    validate_session,
+    INACTIVITY_TIMEOUT_SECONDS,
+    INACTIVITY_WARNING_SECONDS,
+    MAX_SESSION_LIFETIME_SECONDS
 )
 from app.services import (
     get_all_settings,
@@ -28,7 +36,8 @@ from app.services import (
     update_setting,
     log_audit,
     get_active_campaign_id,
-    get_active_campaign
+    get_active_campaign,
+    change_admin_password
 )
 
 
@@ -138,10 +147,27 @@ router = Router()
 def authenticate(req: Request) -> Optional[Dict[str, Any]]:
     token = req.get_token()
     if not token:
+        req.auth_error = "MISSING_TOKEN"
         return None
     user_payload = verify_access_token(token)
     if not user_payload:
+        req.auth_error = "INVALID_OR_EXPIRED_TOKEN"
         return None
+
+    # Validar sessão com inatividade e duração máxima no banco de dados
+    session_id = user_payload.get("sid")
+    if session_id:
+        conn = get_db_connection()
+        try:
+            is_bg_poll = req.environ.get("HTTP_X_BACKGROUND_POLL") == "1"
+            is_valid, err_code, session_info = validate_session(conn, session_id, is_background_poll=is_bg_poll)
+            if not is_valid:
+                req.auth_error = err_code
+                return None
+            req.session_info = session_info
+        finally:
+            conn.close()
+
     req.user = user_payload
     return user_payload
 
@@ -149,7 +175,12 @@ def authenticate(req: Request) -> Optional[Dict[str, Any]]:
 def require_role(req: Request, allowed_roles: List[str]) -> Optional[Tuple[int, Dict[str, str], bytes]]:
     user = authenticate(req)
     if not user:
-        return error_response("Não autenticado. Forneça credenciais válidas.", status=401)
+        err = getattr(req, "auth_error", "")
+        if err == "INACTIVITY_TIMEOUT":
+            return error_response("Sessão encerrada por inatividade (15 minutos sem interação).", status=401, extra={"reason": "INACTIVITY_TIMEOUT"})
+        elif err == "MAX_LIFETIME_EXCEEDED":
+            return error_response("Sessão expirada: limite máximo de 8 horas atingido. Faça login novamente.", status=401, extra={"reason": "MAX_LIFETIME_EXCEEDED"})
+        return error_response("Não autenticado. Forneça credenciais válidas.", status=401, extra={"reason": err or "UNAUTHORIZED"})
     if user.get("role") not in allowed_roles:
         return error_response(
             "Acesso negado: seu perfil não possui permissão para acessar este recurso.",
@@ -159,7 +190,7 @@ def require_role(req: Request, allowed_roles: List[str]) -> Optional[Tuple[int, 
 
 
 # ==========================================
-# Rotas de Autenticação
+# Rotas de Autenticação e Sessão
 # ==========================================
 
 def handle_login(req: Request):
@@ -182,13 +213,22 @@ def handle_login(req: Request):
         if not verify_password(password, user["password_hash"]):
             return error_response("Credenciais inválidas ou usuário inativo.", status=401)
 
-        token = create_access_token(user["id"], user["role"], user["name"], user["email"])
+        # Criar sessão com timestamp de inatividade e expiração máxima
+        user_agent = req.environ.get("HTTP_USER_AGENT", "")
+        session_id = create_user_session(conn, user["id"], ip_address=req.ip_address, user_agent=user_agent)
+        token = create_access_token(user["id"], user["role"], user["name"], user["email"], session_id=session_id)
         log_audit(conn, user["id"], user["name"], "LOGIN", f"Login realizado com sucesso ({user['role']})", req.ip_address)
 
-        cookie_header = f"auth_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={60*60*24}"
+        cookie_header = f"auth_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={MAX_SESSION_LIFETIME_SECONDS}"
         return json_response({
             "success": True,
             "token": token,
+            "session_id": session_id,
+            "session_limits": {
+                "inactivity_warning_seconds": INACTIVITY_WARNING_SECONDS,
+                "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
+                "max_lifetime_seconds": MAX_SESSION_LIFETIME_SECONDS
+            },
             "user": {
                 "id": user["id"],
                 "name": user["name"],
@@ -200,6 +240,91 @@ def handle_login(req: Request):
         conn.close()
 
 router.add("POST", "/api/auth/login", handle_login)
+
+
+def handle_refresh_session(req: Request):
+    """Renova o tempo de inatividade da sessão ativa."""
+    user = authenticate(req)
+    if not user:
+        err = getattr(req, "auth_error", "")
+        if err == "MAX_LIFETIME_EXCEEDED":
+            return error_response("Sessão expirada: limite máximo de 8 horas atingido. Faça login novamente.", status=401, extra={"reason": "MAX_LIFETIME_EXCEEDED"})
+        return error_response("Sessão inválida ou expirada por inatividade.", status=401, extra={"reason": err or "INVALID_SESSION"})
+
+    session_id = user.get("sid")
+    if not session_id:
+        return json_response({
+            "success": True,
+            "message": "Sessão renovada.",
+            "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
+            "inactivity_remaining_seconds": INACTIVITY_TIMEOUT_SECONDS
+        })
+
+    conn = get_db_connection()
+    try:
+        import time as _time
+        now = int(_time.time())
+        session = get_user_session(conn, session_id)
+        if not session or not session.get("is_active"):
+            return error_response("Sessão não encontrada ou já encerrada.", status=401)
+
+        created_at = int(session["created_at"])
+        if (now - created_at) > MAX_SESSION_LIFETIME_SECONDS:
+            invalidate_user_session(conn, session_id)
+            return error_response("Sessão expirada: limite máximo de 8 horas atingido.", status=401, extra={"reason": "MAX_LIFETIME_EXCEEDED"})
+
+        update_user_session_activity(conn, session_id, now)
+        remaining_max = max(0, MAX_SESSION_LIFETIME_SECONDS - (now - created_at))
+
+        return json_response({
+            "success": True,
+            "message": "Sessão renovada com sucesso.",
+            "inactivity_timeout_seconds": INACTIVITY_TIMEOUT_SECONDS,
+            "inactivity_remaining_seconds": INACTIVITY_TIMEOUT_SECONDS,
+            "max_lifetime_remaining_seconds": remaining_max
+        })
+    finally:
+        conn.close()
+
+router.add("POST", "/api/auth/refresh", handle_refresh_session)
+
+
+def handle_session_status(req: Request):
+    """Consulta os tempos restantes da sessão sem renovar inatividade."""
+    req.environ["HTTP_X_BACKGROUND_POLL"] = "1"
+    user = authenticate(req)
+    if not user:
+        err = getattr(req, "auth_error", "")
+        return error_response("Sessão inativa ou expirada.", status=401, extra={"reason": err or "SESSION_EXPIRED"})
+
+    session_id = user.get("sid")
+    if not session_id:
+        return json_response({"success": True, "active": True})
+
+    conn = get_db_connection()
+    try:
+        import time as _time
+        now = int(_time.time())
+        session = get_user_session(conn, session_id)
+        if not session or not session.get("is_active"):
+            return error_response("Sessão inativa.", status=401, extra={"reason": "INACTIVE"})
+
+        created_at = int(session["created_at"])
+        last_activity = int(session["last_activity"])
+
+        inactivity_remaining = max(0, INACTIVITY_TIMEOUT_SECONDS - (now - last_activity))
+        max_remaining = max(0, MAX_SESSION_LIFETIME_SECONDS - (now - created_at))
+
+        return json_response({
+            "success": True,
+            "active": True,
+            "inactivity_remaining_seconds": inactivity_remaining,
+            "max_lifetime_remaining_seconds": max_remaining
+        })
+    finally:
+        conn.close()
+
+router.add("GET", "/api/auth/session-status", handle_session_status)
 
 
 def handle_get_me(req: Request):
@@ -225,10 +350,54 @@ router.add("GET", "/api/auth/me", handle_get_me)
 
 
 def handle_logout(req: Request):
+    token = req.get_token()
+    if token:
+        user_payload = verify_access_token(token)
+        if user_payload and user_payload.get("sid"):
+            conn = get_db_connection()
+            try:
+                invalidate_user_session(conn, user_payload["sid"])
+                log_audit(conn, user_payload.get("sub"), user_payload.get("name"), "LOGOUT", "Logout realizado com encerramento de sessão", req.ip_address)
+            finally:
+                conn.close()
+
     cookie_header = "auth_token=; Path=/; HttpOnly; Max-Age=0"
     return json_response({"success": True, "message": "Sessão encerrada com sucesso."}, headers={"Set-Cookie": cookie_header})
 
 router.add("POST", "/api/auth/logout", handle_logout)
+
+
+def handle_admin_security_password(req: Request):
+    """Permite ao Administrador Geral alterar sua própria senha de acesso com validações seguras."""
+    auth_err = require_role(req, ["ADMIN"])
+    if auth_err:
+        return auth_err
+
+    data = req.json
+    current_password = str(data.get("current_password", ""))
+    new_password = str(data.get("new_password", ""))
+    confirm_password = str(data.get("confirm_password", ""))
+
+    admin_id = req.user["sub"]
+    conn = get_db_connection()
+    try:
+        success, message = change_admin_password(
+            conn,
+            admin_id=admin_id,
+            current_pwd=current_password,
+            new_pwd=new_password,
+            confirm_pwd=confirm_password,
+            ip_address=req.ip_address
+        )
+        if not success:
+            return error_response(message, status=400)
+        return json_response({"success": True, "message": message})
+    finally:
+        conn.close()
+
+router.add("POST", "/api/admin/security/password", handle_admin_security_password)
+router.add("POST", "/api/admin/change-password", handle_admin_security_password)
+
 
 
 # ==========================================

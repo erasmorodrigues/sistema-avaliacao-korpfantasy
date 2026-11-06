@@ -40,6 +40,10 @@
     const headers = options.headers || {};
     headers["Accept"] = "application/json";
 
+    if (options.background) {
+      headers["X-Background-Poll"] = "1";
+    }
+
     if (state.token) {
       headers["Authorization"] = `Bearer ${state.token}`;
     }
@@ -56,10 +60,17 @@
       if (response.status === 401) {
         // Sessão expirada ou não autenticada
         if (state.token) {
-          showToast("Sessão expirada. Faça login novamente.", "error");
-          logout();
+          const reason = data.reason || "";
+          if (reason === "INACTIVITY_TIMEOUT") {
+            handleSessionExpired("inactivity");
+          } else if (reason === "MAX_LIFETIME_EXCEEDED") {
+            handleSessionExpired("max_lifetime");
+          } else {
+            showToast(data.error || "Sessão expirada. Faça login novamente.", "error");
+            logout();
+          }
         }
-        return { success: false, error: data.error || "Não autenticado." };
+        return { success: false, error: data.error || "Não autenticado.", status: 401, reason: data.reason };
       }
 
       if (!response.ok) {
@@ -210,6 +221,349 @@
     }
   }
 
+  // =========================================================================
+  // Gerenciamento de Sessão, Inatividade (13+2=15 min) e Expiração Máxima (8h)
+  // =========================================================================
+
+  const SESSION_CONFIG = {
+    INACTIVITY_TIMEOUT_MS: 15 * 60 * 1000,       // 15 minutos de inatividade
+    INACTIVITY_WARNING_MS: 13 * 60 * 1000,       // 13 minutos até exibir aviso
+    COUNTDOWN_DURATION_MS: 2 * 60 * 1000,        // 2 minutos de contagem regressiva
+    MAX_SESSION_LIFETIME_MS: 8 * 60 * 60 * 1000, // 8 horas de duração máxima
+    ACTIVITY_THROTTLE_MS: 4000                   // 4 segundos de throttle para registrar atividade
+  };
+
+  let sessionCheckInterval = null;
+  let lastRecordedActivity = Date.now();
+  let isWarningModalOpen = false;
+  let isSessionTerminating = false;
+
+  function initSessionManager() {
+    // Eventos de interação humana real
+    const activityEvents = [
+      "mousemove", "mousedown", "click", "keydown",
+      "input", "touchstart", "touchend", "scroll", "wheel"
+    ];
+
+    activityEvents.forEach(evt => {
+      window.addEventListener(evt, handleUserActivity, { passive: true });
+    });
+
+    // Sincronização multi-abas
+    window.addEventListener("storage", handleMultiTabStorageEvent);
+
+    // Botão Continuar Conectado
+    const btnStay = document.getElementById("btnSessionStayConnected");
+    if (btnStay) {
+      btnStay.addEventListener("click", () => {
+        renewSession();
+      });
+    }
+
+    // Botão Sair Agora no modal
+    const btnLogoutNow = document.getElementById("btnSessionLogoutNow");
+    if (btnLogoutNow) {
+      btnLogoutNow.addEventListener("click", () => {
+        closeSessionTimeoutModal();
+        logout("Você encerrou a sessão.");
+      });
+    }
+
+    // Formulário de alteração de senha do Administrador
+    const formAdminPwd = document.getElementById("formAdminChangePassword");
+    if (formAdminPwd) {
+      formAdminPwd.addEventListener("submit", handleAdminPasswordSubmit);
+    }
+
+    startSessionMonitor();
+  }
+
+  function handleUserActivity() {
+    if (!state.token || isSessionTerminating) return;
+
+    const now = Date.now();
+    // Se o modal de aviso estava aberto e o usuário interagiu, fecha modal e renova
+    if (isWarningModalOpen) {
+      renewSession();
+      return;
+    }
+
+    if (now - lastRecordedActivity >= SESSION_CONFIG.ACTIVITY_THROTTLE_MS) {
+      lastRecordedActivity = now;
+      try {
+        localStorage.setItem("auth_last_activity", now.toString());
+      } catch (e) {}
+    }
+  }
+
+  function handleMultiTabStorageEvent(e) {
+    if (e.key === "auth_last_activity" && e.newValue) {
+      const remoteActivity = parseInt(e.newValue, 10);
+      if (!isNaN(remoteActivity) && remoteActivity > lastRecordedActivity) {
+        lastRecordedActivity = remoteActivity;
+        if (isWarningModalOpen) {
+          closeSessionTimeoutModal();
+        }
+      }
+    } else if (e.key === "auth_session_event" && e.newValue) {
+      try {
+        const payload = JSON.parse(e.newValue);
+        if (payload.action === "LOGOUT") {
+          terminateSessionLocally("Sua sessão foi encerrada em outra aba.");
+        } else if (payload.action === "EXPIRED_INACTIVITY") {
+          terminateSessionLocally("Sessão encerrada por inatividade (15 minutos sem interação).");
+        } else if (payload.action === "EXPIRED_MAX_LIFETIME") {
+          terminateSessionLocally("Sessão expirada: limite máximo de 8 horas atingido.");
+        }
+      } catch (err) {}
+    } else if (e.key === "auth_token" && !e.newValue && state.token) {
+      terminateSessionLocally("Sessão encerrada.");
+    }
+  }
+
+  function startSessionMonitor() {
+    if (sessionCheckInterval) clearInterval(sessionCheckInterval);
+    sessionCheckInterval = setInterval(checkSessionTimers, 1000);
+  }
+
+  function checkSessionTimers() {
+    if (!state.token || isSessionTerminating) {
+      if (isWarningModalOpen) closeSessionTimeoutModal();
+      return;
+    }
+
+    const now = Date.now();
+
+    // 1. Validar Expiração Máxima de 8 horas desde o login
+    const sessionCreatedAt = parseInt(localStorage.getItem("auth_session_created_at") || "0", 10);
+    if (sessionCreatedAt > 0 && (now - sessionCreatedAt) >= SESSION_CONFIG.MAX_SESSION_LIFETIME_MS) {
+      handleSessionExpired("max_lifetime");
+      return;
+    }
+
+    // 2. Validar Tempo de Inatividade
+    const storedLastActivity = parseInt(localStorage.getItem("auth_last_activity") || "0", 10);
+    const effectiveLastActivity = Math.max(lastRecordedActivity, storedLastActivity || 0);
+    const inactiveDuration = now - effectiveLastActivity;
+
+    if (inactiveDuration >= SESSION_CONFIG.INACTIVITY_TIMEOUT_MS) {
+      // 15 minutos completados -> logout automático
+      handleSessionExpired("inactivity");
+    } else if (inactiveDuration >= SESSION_CONFIG.INACTIVITY_WARNING_MS) {
+      // Entre 13 e 15 minutos -> exibe aviso com contagem regressiva de 2 minutos
+      const remainingMs = SESSION_CONFIG.INACTIVITY_TIMEOUT_MS - inactiveDuration;
+      openSessionTimeoutModal(remainingMs);
+    } else {
+      if (isWarningModalOpen) {
+        closeSessionTimeoutModal();
+      }
+    }
+  }
+
+  function openSessionTimeoutModal(remainingMs) {
+    const modal = document.getElementById("modalSessionTimeout");
+    if (!modal) return;
+
+    isWarningModalOpen = true;
+    modal.style.display = "flex";
+
+    const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    const formatted = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+
+    const countdownEl = document.getElementById("sessionCountdownDisplay");
+    if (countdownEl) countdownEl.textContent = formatted;
+
+    // Se estiver no perfil de juiz avaliando, destaca preservação de rascunho
+    const draftNotice = document.getElementById("sessionDraftNotice");
+    if (draftNotice) {
+      const isEvaluating = state.judge && state.judge.currentCandidate;
+      draftNotice.style.display = isEvaluating ? "block" : "none";
+    }
+  }
+
+  function closeSessionTimeoutModal() {
+    isWarningModalOpen = false;
+    const modal = document.getElementById("modalSessionTimeout");
+    if (modal) modal.style.display = "none";
+  }
+
+  async function renewSession() {
+    closeSessionTimeoutModal();
+    const now = Date.now();
+    lastRecordedActivity = now;
+    try {
+      localStorage.setItem("auth_last_activity", now.toString());
+    } catch (e) {}
+
+    const res = await apiRequest("/api/auth/refresh", { method: "POST" });
+    if (res.success) {
+      showToast("Sessão renovada com sucesso!", "success");
+    } else if (res.status === 401 || res.reason === "MAX_LIFETIME_EXCEEDED") {
+      handleSessionExpired("max_lifetime");
+    }
+  }
+
+  function handleSessionExpired(reason) {
+    if (isSessionTerminating) return;
+    isSessionTerminating = true;
+    closeSessionTimeoutModal();
+
+    let msg = "Sua sessão foi encerrada por inatividade (15 minutos sem interação).";
+    let eventAction = "EXPIRED_INACTIVITY";
+    if (reason === "max_lifetime") {
+      msg = "Sua sessão atingiu o tempo limite máximo de 8 horas. Por motivos de segurança, faça login novamente.";
+      eventAction = "EXPIRED_MAX_LIFETIME";
+    }
+
+    try {
+      localStorage.setItem("auth_session_event", JSON.stringify({
+        action: eventAction,
+        timestamp: Date.now()
+      }));
+    } catch (e) {}
+
+    const oldToken = state.token;
+    state.token = null;
+    state.user = null;
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("auth_session_created_at");
+
+    if (oldToken) {
+      fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${oldToken}` }
+      }).catch(() => {});
+    }
+
+    switchView("viewLogin");
+    showToast(msg, "warning");
+
+    setTimeout(() => {
+      isSessionTerminating = false;
+    }, 1000);
+  }
+
+  function terminateSessionLocally(message) {
+    isSessionTerminating = true;
+    closeSessionTimeoutModal();
+    state.token = null;
+    state.user = null;
+    switchView("viewLogin");
+    showToast(message, "info");
+    setTimeout(() => {
+      isSessionTerminating = false;
+    }, 1000);
+  }
+
+  // =========================================================================
+  // Preservação de Rascunhos de Avaliação dos Juízes
+  // =========================================================================
+
+  function getDraftKey(judgeId, candidateId) {
+    return `draft_eval_${judgeId}_${candidateId}`;
+  }
+
+  function saveEvaluationDraft(judgeId, candidateId, scores) {
+    if (!judgeId || !candidateId) return;
+    try {
+      localStorage.setItem(getDraftKey(judgeId, candidateId), JSON.stringify({
+        scores: scores || {},
+        updatedAt: Date.now()
+      }));
+    } catch (e) {}
+  }
+
+  function loadEvaluationDraft(judgeId, candidateId) {
+    if (!judgeId || !candidateId) return null;
+    try {
+      const raw = localStorage.getItem(getDraftKey(judgeId, candidateId));
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearEvaluationDraft(judgeId, candidateId) {
+    if (!judgeId || !candidateId) return;
+    try {
+      localStorage.removeItem(getDraftKey(judgeId, candidateId));
+    } catch (e) {}
+  }
+
+  // =========================================================================
+  // Segurança e Senha do Administrador
+  // =========================================================================
+
+  async function handleAdminPasswordSubmit(e) {
+    e.preventDefault();
+    const currentPassword = document.getElementById("adminCurrentPassword").value;
+    const newPassword = document.getElementById("adminNewPassword").value;
+    const confirmPassword = document.getElementById("adminConfirmPassword").value;
+    const btn = document.getElementById("btnSubmitAdminPassword");
+
+    if (!currentPassword) {
+      showToast("Informe a senha atual.", "error");
+      return;
+    }
+    if (newPassword.length < 8) {
+      showToast("A nova senha deve possuir no mínimo 8 caracteres.", "error");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast("A nova senha e a confirmação não coincidem.", "error");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = "<span>Salvando...</span>";
+
+    const res = await apiRequest("/api/admin/security/password", {
+      method: "POST",
+      body: {
+        current_password: currentPassword,
+        new_password: newPassword,
+        confirm_password: confirmPassword
+      }
+    });
+
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Salvar Nova Senha</span>`;
+
+    if (res.success) {
+      showToast(res.message || "Senha de administrador atualizada com sucesso!", "success");
+      document.getElementById("formAdminChangePassword").reset();
+    } else {
+      showToast(res.error || "Erro ao atualizar senha.", "error");
+    }
+  }
+
+  window.togglePasswordVisibility = function (inputId, btnEl) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    if (input.type === "password") {
+      input.type = "text";
+      btnEl.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>`;
+    } else {
+      input.type = "password";
+      btnEl.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>`;
+    }
+  };
+
+  window.switchAdminTab = function (tabId) {
+    document.querySelectorAll(".admin-nav-item").forEach(item => {
+      if (item.getAttribute("data-tab") === tabId) item.classList.add("active");
+      else item.classList.remove("active");
+    });
+    document.querySelectorAll(".admin-tab-pane").forEach(pane => {
+      if (pane.id === tabId) pane.classList.add("active");
+      else pane.classList.remove("active");
+    });
+    state.admin.currentTab = tabId;
+    handleAdminTabLoad(tabId);
+  };
+
   async function handleLoginSubmit(e) {
     e.preventDefault();
     const email = document.getElementById("loginEmail").value.trim();
@@ -230,7 +584,11 @@
     if (res.success && res.token) {
       state.token = res.token;
       state.user = res.user;
+      const now = Date.now();
+      lastRecordedActivity = now;
       localStorage.setItem("auth_token", res.token);
+      localStorage.setItem("auth_session_created_at", now.toString());
+      localStorage.setItem("auth_last_activity", now.toString());
       showToast(`Bem-vindo, ${res.user.name}!`, "success");
       routeUserByRole();
     } else {
@@ -238,13 +596,28 @@
     }
   }
 
-  function logout() {
+  function logout(customMessage) {
+    closeSessionTimeoutModal();
+    try {
+      localStorage.setItem("auth_session_event", JSON.stringify({
+        action: "LOGOUT",
+        timestamp: Date.now()
+      }));
+    } catch (e) {}
+
+    const oldToken = state.token;
     state.token = null;
     state.user = null;
     localStorage.removeItem("auth_token");
-    apiRequest("/api/auth/logout", { method: "POST" });
+    localStorage.removeItem("auth_session_created_at");
+    localStorage.removeItem("auth_last_activity");
+
+    if (oldToken) {
+      apiRequest("/api/auth/logout", { method: "POST" });
+    }
+
     switchView("viewLogin");
-    showToast("Você saiu do sistema.", "info");
+    showToast(customMessage || "Você saiu do sistema.", "info");
   }
 
   // =========================================================================
@@ -356,6 +729,15 @@
     state.judge.currentCandidate = candidate;
     state.judge.selectedScores = { ...(candidate.scores || {}) };
 
+    // Recuperação de rascunho salvo caso o juiz tenha saído ou a sessão tenha caído
+    if (state.user && state.user.id) {
+      const draft = loadEvaluationDraft(state.user.id, candidate.id);
+      if (draft && draft.scores && Object.keys(draft.scores).length > 0) {
+        state.judge.selectedScores = { ...state.judge.selectedScores, ...draft.scores };
+        showToast("Rascunho de notas recuperado automaticamente.", "info");
+      }
+    }
+
     document.getElementById("evalCandidateName").textContent = candidate.name;
     document.getElementById("evalCandidateNumber").textContent = `Nº ${candidate.number || candidate.id}`;
     document.getElementById("evalCandidateDesc").textContent = candidate.description || "Apresentação sem descrição.";
@@ -413,6 +795,11 @@
           if (readOnly) return;
           state.judge.selectedScores[cat.id] = scoreVal;
 
+          // Salvar rascunho seguro a cada nota selecionada para evitar perdas
+          if (state.user && state.judge.currentCandidate) {
+            saveEvaluationDraft(state.user.id, state.judge.currentCandidate.id, state.judge.selectedScores);
+          }
+
           // Atualizar estado visual
           group.querySelectorAll(".btn-score").forEach(b => b.classList.remove("active"));
           btn.classList.add("active");
@@ -441,6 +828,12 @@
     const candidate = state.judge.currentCandidate;
     if (!candidate) return;
 
+    if (!state.token) {
+      showToast("Sessão expirada. Seus dados continuam salvos em rascunho. Faça login para confirmar.", "warning");
+      switchView("viewLogin");
+      return;
+    }
+
     const categories = state.judge.categories;
     const scores = state.judge.selectedScores;
 
@@ -467,6 +860,10 @@
     confirmBtn.disabled = false;
 
     if (res.success) {
+      // Limpar rascunho com sucesso confirmado
+      if (state.user) {
+        clearEvaluationDraft(state.user.id, candidate.id);
+      }
       showToast(`Avaliação de ${candidate.name} confirmada com sucesso!`, "success");
       await loadJudgeVotingScreen();
       switchView("viewJudge");
@@ -1355,6 +1752,11 @@
     window.switchView = switchView;
     window.loadAdminDashboard = loadAdminDashboard;
     window.loadAdminRankings = loadAdminRankings;
+    window.renewSession = renewSession;
+    window.closeSessionTimeoutModal = closeSessionTimeoutModal;
+
+    // Inicializar gerenciamento centralizado de sessão e inatividade
+    initSessionManager();
 
     // Verificar sessão existente
     checkAuthSession();

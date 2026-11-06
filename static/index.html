@@ -224,6 +224,10 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
               <span>Controle do Evento</span>
             </button>
+            <button class="admin-nav-item" data-tab="tabSecurity">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span>Segurança e Senha</span>
+            </button>
           </nav>
         </aside>
 
@@ -564,6 +568,28 @@
               </div>
             </div>
 
+            <!-- Opção no Controle de Eventos: Segurança e Senha do Administrador -->
+            <div class="card" style="margin-top: 1.5rem; border: 1px solid rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.02);">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; border-bottom: 1px solid rgba(59, 130, 246, 0.2);">
+                <div>
+                  <h3 style="margin: 0; color: var(--text-color); display: flex; align-items: center; gap: 0.5rem;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span>Segurança e Senha do Administrador</span>
+                  </h3>
+                  <p class="tab-subtitle" style="margin: 0.25rem 0 0 0;">Gerencie e altere a senha do Administrador Geral com criptografia robusta.</p>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm" onclick="window.switchAdminTab('tabSecurity')">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                  <span>Acessar Painel de Segurança</span>
+                </button>
+              </div>
+              <div class="card-body">
+                <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0;">
+                  Permite substituir a senha padrão por uma credencial forte e personalizada (mínimo de 8 caracteres). A alteração é persistida no banco de dados e passa a valer imediatamente, sem necessidade de novo deploy.
+                </p>
+              </div>
+            </div>
+
             <!-- Zona de Perigo: Limpar Candidatos -->
             <div class="card" style="margin-top: 1.5rem; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.03);">
               <div class="card-header" style="border-bottom: 1px solid rgba(239, 68, 68, 0.2);">
@@ -601,6 +627,135 @@
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+
+          <!-- TAB: SEGURANÇA E SENHA DO ADMINISTRADOR -->
+          <div class="admin-tab-pane" id="tabSecurity">
+            <div class="tab-header">
+              <div>
+                <h2>Segurança e Senha do Administrador</h2>
+                <p class="tab-subtitle">Altere sua credencial de acesso e consulte os parâmetros ativos de sessão e proteção de dados.</p>
+              </div>
+            </div>
+
+            <div class="grid-2-cols" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-top: 1rem;">
+              
+              <!-- Formulário de Alteração de Senha -->
+              <div class="card">
+                <div class="card-header">
+                  <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                    <span>Alterar Senha do Administrador</span>
+                  </h3>
+                </div>
+                <div class="card-body">
+                  <form id="formAdminChangePassword" class="form-vertical">
+                    
+                    <div class="form-group">
+                      <label for="adminCurrentPassword">Senha Atual *</label>
+                      <div class="password-input-wrapper">
+                        <input type="password" id="adminCurrentPassword" class="form-input" required placeholder="Digite a senha atual" autocomplete="current-password">
+                        <button type="button" class="btn-toggle-pwd" onclick="window.togglePasswordVisibility('adminCurrentPassword', this)" title="Visualizar ou ocultar senha">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="form-group">
+                      <label for="adminNewPassword">Nova Senha * (mínimo de 8 caracteres)</label>
+                      <div class="password-input-wrapper">
+                        <input type="password" id="adminNewPassword" class="form-input" minlength="8" required placeholder="Digite a nova senha segura" autocomplete="new-password">
+                        <button type="button" class="btn-toggle-pwd" onclick="window.togglePasswordVisibility('adminNewPassword', this)" title="Visualizar ou ocultar senha">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="form-group">
+                      <label for="adminConfirmPassword">Confirmar Nova Senha *</label>
+                      <div class="password-input-wrapper">
+                        <input type="password" id="adminConfirmPassword" class="form-input" minlength="8" required placeholder="Repita a nova senha digitada" autocomplete="new-password">
+                        <button type="button" class="btn-toggle-pwd" onclick="window.togglePasswordVisibility('adminConfirmPassword', this)" title="Visualizar ou ocultar senha">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style="margin-top: 1.5rem;">
+                      <button type="submit" class="btn btn-primary btn-block" id="btnSubmitAdminPassword">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                        <span>Salvar Nova Senha</span>
+                      </button>
+                    </div>
+
+                  </form>
+                </div>
+              </div>
+
+              <!-- Card de Regras e Parâmetros de Segurança de Sessão -->
+              <div class="card">
+                <div class="card-header">
+                  <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    <span>Políticas de Segurança e Sessão Ativas</span>
+                  </h3>
+                </div>
+                <div class="card-body">
+                  <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    
+                    <div style="display: flex; gap: 0.75rem;">
+                      <div style="color: var(--accent-blue); padding-top: 2px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                      </div>
+                      <div>
+                        <strong style="display: block; font-size: 0.95rem;">Controle de Inatividade (15 min)</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0.25rem 0 0 0;">
+                          Após 13 minutos sem interação real (mouse, cliques, teclado ou toques), um aviso com contagem regressiva de 2 minutos é exibido. Caso não seja renovada, a sessão é encerrada com segurança.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div style="display: flex; gap: 0.75rem;">
+                      <div style="color: var(--accent-purple); padding-top: 2px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>
+                      </div>
+                      <div>
+                        <strong style="display: block; font-size: 0.95rem;">Expiração Máxima Absoluta (8 horas)</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0.25rem 0 0 0;">
+                          Independentemente de estar ativo, qualquer sessão expira após 8 horas consecutivas, exigindo novo login.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div style="display: flex; gap: 0.75rem;">
+                      <div style="color: var(--text-emerald); padding-top: 2px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg>
+                      </div>
+                      <div>
+                        <strong style="display: block; font-size: 0.95rem;">Preservação Automática de Rascunhos</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0.25rem 0 0 0;">
+                          Notas e dados em preenchimento pelos juízes são mantidos em rascunho seguro e recuperados automaticamente após reautenticação.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div style="display: flex; gap: 0.75rem;">
+                      <div style="color: var(--accent-blue); padding-top: 2px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                      </div>
+                      <div>
+                        <strong style="display: block; font-size: 0.95rem;">Criptografia Padrão PBKDF2-HMAC-SHA256</strong>
+                        <p style="font-size: 0.85rem; color: var(--text-muted); margin: 0.25rem 0 0 0;">
+                          Armazenamento seguro com 100.000 iterações e salt aleatório único por senha.
+                        </p>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
 
@@ -829,6 +984,43 @@
           <button type="submit" class="btn btn-primary">Salvar Categoria</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- MODAL: AVISO DE INATIVIDADE DA SESSÃO COM CONTAGEM REGRESSIVA -->
+  <div class="modal session-timeout-modal" id="modalSessionTimeout" style="display:none; z-index: 99999;">
+    <div class="modal-dialog modal-dialog-centered" style="max-width: 460px;">
+      <div class="modal-header" style="border-bottom: 1px solid var(--border-color); padding: 1.25rem 1.5rem; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <div class="session-warning-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div>
+          <h3 style="margin: 0; font-size: 1.15rem; color: var(--text-color);">Sessão Expirando por Inatividade</h3>
+        </div>
+      </div>
+      <div class="modal-body" style="padding: 1.5rem; text-align: center;">
+        <p style="font-size: 0.95rem; color: var(--text-muted); margin-bottom: 1.25rem; line-height: 1.5;">
+          Você está inativo há mais de <strong>13 minutos</strong>. Para proteger sua conta e os dados do evento, sua sessão será encerrada automaticamente em:
+        </p>
+        <div class="session-countdown-box">
+          <span id="sessionCountdownDisplay" class="countdown-timer">02:00</span>
+          <span class="countdown-label">tempo restante</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 1rem; margin-bottom: 0;">
+          Clique em <strong>"Continuar Conectado"</strong> para renovar sua sessão imediatamente e continuar utilizando o sistema.
+        </p>
+        <div class="session-draft-notice" id="sessionDraftNotice" style="display:none; margin-top: 1rem; font-size: 0.85rem; color: #10b981; background: rgba(16, 185, 129, 0.1); padding: 0.5rem 0.75rem; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.25);">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: -2px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/></svg>
+          Suas notas e avaliações em andamento foram salvas em rascunho de segurança.
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 1rem 1.5rem; display: flex; gap: 0.75rem; justify-content: flex-end;">
+        <button type="button" class="btn btn-ghost" id="btnSessionLogoutNow">Sair Agora</button>
+        <button type="button" class="btn btn-primary btn-lg" id="btnSessionStayConnected">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          <span>Continuar Conectado</span>
+        </button>
+      </div>
     </div>
   </div>
 

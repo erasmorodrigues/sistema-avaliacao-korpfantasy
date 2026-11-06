@@ -706,6 +706,277 @@ class TestCandidateEvaluationSystem(unittest.TestCase):
         })
         self.assertEqual(status_old, 401)
 
+    def test_session_active_user_flow(self):
+        """1. Cenário: Usuário permanece ativo: sessão continua funcionando normalmente."""
+        status, _, login_data, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": "admin123"
+        })
+        self.assertEqual(status, 200)
+        token = login_data["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Acesso a rota protegida com usuário ativo
+        status_me, _, me_data, _ = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(status_me, 200)
+        self.assertTrue(me_data["success"])
+        self.assertEqual(me_data["user"]["email"], "admin@sistema.com")
+
+        # Status da sessão retorna ativo com tempos restantes
+        status_s, _, s_data, _ = self.client.get("/api/auth/session-status", headers=headers)
+        self.assertEqual(status_s, 200)
+        self.assertTrue(s_data["active"])
+        self.assertGreater(s_data["inactivity_remaining_seconds"], 0)
+
+    def test_session_inactivity_timeout_and_protection(self):
+        """2 e 5. Cenário: Inatividade de 15 minutos encerra sessão e bloqueia rotas protegidas."""
+        status, _, login_data, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": "admin123"
+        })
+        self.assertEqual(status, 200)
+        token = login_data["token"]
+        session_id = login_data["session_id"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Simular que se passaram 15 minutos e 5 segundos sem qualquer interação (905 segundos)
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            import time
+            now = int(time.time())
+            conn.execute("UPDATE user_sessions SET last_activity = ? WHERE session_id = ?", (now - 905, session_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Tentar acessar rota protegida após expiração de inatividade
+        status_dash, _, err_data, _ = self.client.get("/api/admin/dashboard", headers=headers)
+        self.assertEqual(status_dash, 401)
+        self.assertFalse(err_data["success"])
+        self.assertEqual(err_data.get("reason"), "INACTIVITY_TIMEOUT")
+
+        # Verificar se sessão foi marcada inativa no banco
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            row = conn.execute("SELECT is_active FROM user_sessions WHERE session_id = ?", (session_id,)).fetchone()
+            self.assertEqual(row["is_active"], 0)
+        finally:
+            conn.close()
+
+    def test_session_refresh_continue_connected(self):
+        """3. Cenário: Usuário clica em 'Continuar conectado' e a sessão é renovada."""
+        status, _, login_data, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": "admin123"
+        })
+        token = login_data["token"]
+        session_id = login_data["session_id"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Simular 13 minutos de inatividade (780 segundos)
+        import time
+        now = int(time.time())
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            conn.execute("UPDATE user_sessions SET last_activity = ? WHERE session_id = ?", (now - 780, session_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Usuário clica em 'Continuar conectado' -> chamada POST /api/auth/refresh
+        status_ref, _, ref_data, _ = self.client.post("/api/auth/refresh", headers=headers)
+        self.assertEqual(status_ref, 200)
+        self.assertTrue(ref_data["success"])
+        self.assertEqual(ref_data["inactivity_remaining_seconds"], 900)
+
+        # Confirmar que last_activity no banco foi atualizado para o tempo presente
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            row = conn.execute("SELECT last_activity FROM user_sessions WHERE session_id = ?", (session_id,)).fetchone()
+            self.assertGreaterEqual(row["last_activity"], now)
+        finally:
+            conn.close()
+
+    def test_session_max_lifetime_8_hours_limit(self):
+        """9. Cenário: Sessão atinge limite absoluto de 8 horas e exige novo login."""
+        status, _, login_data, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": "admin123"
+        })
+        token = login_data["token"]
+        session_id = login_data["session_id"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Simular que a sessão foi criada há 8 horas e 10 segundos
+        import time
+        now = int(time.time())
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            conn.execute("""
+                UPDATE user_sessions 
+                SET created_at = ?, last_activity = ? 
+                WHERE session_id = ?
+            """, (now - (8 * 3600 + 10), now, session_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Tentar acessar rota protegida ou renovar sessão
+        status_dash, _, err_dash, _ = self.client.get("/api/admin/dashboard", headers=headers)
+        self.assertEqual(status_dash, 401)
+        self.assertEqual(err_dash.get("reason"), "MAX_LIFETIME_EXCEEDED")
+
+        # Tentar renovar também é rejeitado após 8 horas
+        status_ref, _, err_ref, _ = self.client.post("/api/auth/refresh", headers=headers)
+        self.assertEqual(status_ref, 401)
+        self.assertEqual(err_ref.get("reason"), "MAX_LIFETIME_EXCEEDED")
+
+    def test_manual_logout_invalidates_session(self):
+        """6. Cenário: Logout manual invalida imediatamente a sessão no servidor."""
+        status, _, login_data, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": "admin123"
+        })
+        token = login_data["token"]
+        session_id = login_data["session_id"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # Logout manual
+        status_out, _, out_data, _ = self.client.post("/api/auth/logout", headers=headers)
+        self.assertEqual(status_out, 200)
+        self.assertTrue(out_data["success"])
+
+        # Sessão deve estar inativa no banco
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            row = conn.execute("SELECT is_active FROM user_sessions WHERE session_id = ?", (session_id,)).fetchone()
+            self.assertEqual(row["is_active"], 0)
+        finally:
+            conn.close()
+
+        # Próxima tentativa de acesso deve ser rejeitada com 401
+        status_denied, _, _, _ = self.client.get("/api/admin/dashboard", headers=headers)
+        self.assertEqual(status_denied, 401)
+
+    def test_background_poll_does_not_reset_inactivity(self):
+        """Cenário: Chamadas automáticas de API em segundo plano NÃO contam como atividade."""
+        status, _, login_data, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": "admin123"
+        })
+        session_id = login_data["session_id"]
+        token = login_data["token"]
+
+        import time
+        now = int(time.time())
+        initial_activity = now - 500  # 500 segundos atrás
+
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            conn.execute("UPDATE user_sessions SET last_activity = ? WHERE session_id = ?", (initial_activity, session_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Requisição com header de background poll
+        bg_headers = {
+            "Authorization": f"Bearer {token}",
+            "X-Background-Poll": "1"
+        }
+        status_poll, _, _, _ = self.client.get("/api/admin/dashboard", headers=bg_headers)
+        self.assertEqual(status_poll, 200)
+
+        # Confirmar que last_activity NÃO foi atualizado para now
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            row = conn.execute("SELECT last_activity FROM user_sessions WHERE session_id = ?", (session_id,)).fetchone()
+            self.assertEqual(row["last_activity"], initial_activity)
+        finally:
+            conn.close()
+
+    def test_admin_change_password_full_security(self):
+        """Cenário: Alteração segura de senha do Administrador Geral."""
+        # 1. Login inicial com senha padrão
+        status, _, login_data, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": "admin123"
+        })
+        self.assertEqual(status, 200)
+        admin_token = login_data["token"]
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+        judge_headers = {"Authorization": f"Bearer {self.judge_token}"}
+
+        # 2. Juiz tenta alterar senha do admin -> 403 Forbidden
+        status_j, _, _, _ = self.client.post("/api/admin/security/password", body={
+            "current_password": "qualquer_coisa",
+            "new_password": "SenhaJuizTentando@123",
+            "confirm_password": "SenhaJuizTentando@123"
+        }, headers=judge_headers)
+        self.assertEqual(status_j, 403)
+
+        # 3. Senha atual incorreta
+        status_w, _, err_w, _ = self.client.post("/api/admin/security/password", body={
+            "current_password": "senha_errada_aqui",
+            "new_password": "NovaSenhaForte2026!",
+            "confirm_password": "NovaSenhaForte2026!"
+        }, headers=admin_headers)
+        self.assertEqual(status_w, 400)
+        self.assertIn("incorreta", err_w["error"].lower())
+
+        # 4. Senha com menos de 8 caracteres
+        status_short, _, err_short, _ = self.client.post("/api/admin/security/password", body={
+            "current_password": "admin123",
+            "new_password": "curta",
+            "confirm_password": "curta"
+        }, headers=admin_headers)
+        self.assertEqual(status_short, 400)
+        self.assertIn("8 caracteres", err_short["error"])
+
+        # 5. Confirmação diferente da nova senha
+        status_mismatch, _, err_mismatch, _ = self.client.post("/api/admin/security/password", body={
+            "current_password": "admin123",
+            "new_password": "NovaSenhaForte2026!",
+            "confirm_password": "OutraSenhaDiferente!"
+        }, headers=admin_headers)
+        self.assertEqual(status_mismatch, 400)
+        self.assertIn("não coincidem", err_mismatch["error"])
+
+        # 6. Alteração com sucesso
+        nova_senha_admin = "AdminForte@2026!#"
+        status_ok, _, ok_data, _ = self.client.post("/api/admin/security/password", body={
+            "current_password": "admin123",
+            "new_password": nova_senha_admin,
+            "confirm_password": nova_senha_admin
+        }, headers=admin_headers)
+        self.assertEqual(status_ok, 200)
+        self.assertTrue(ok_data["success"])
+
+        # 7. Antiga senha 'admin123' deixa de funcionar
+        status_old, _, _, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": "admin123"
+        })
+        self.assertEqual(status_old, 401)
+
+        # 8. Nova senha funciona perfeitamente
+        status_new, _, new_login, _ = self.client.post("/api/auth/login", body={
+            "email": "admin@sistema.com",
+            "password": nova_senha_admin
+        })
+        self.assertEqual(status_new, 200)
+        self.assertTrue(new_login["success"])
+        self.assertEqual(new_login["user"]["role"], "ADMIN")
+
+        # 9. Validar que o hash no banco preserva PBKDF2
+        conn = get_db_connection(self.temp_db_path)
+        try:
+            row = conn.execute("SELECT password_hash FROM users WHERE email = 'admin@sistema.com'").fetchone()
+            self.assertTrue(row["password_hash"].startswith("pbkdf2_sha256$100000$"))
+        finally:
+            conn.close()
+
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -705,3 +705,44 @@ def delete_judge_safe(conn: sqlite3.Connection, judge_id: int, user_id: int, use
         conn.execute("DELETE FROM users WHERE id = ?", (judge_id,))
         log_audit(conn, user_id, user_name, "DELETE_JUDGE", f"Juiz '{judge_name}' (ID {judge_id}) excluído.")
         return True, f"Juiz '{judge_name}' excluído com sucesso."
+
+
+def change_admin_password(conn: sqlite3.Connection, admin_id: int, current_pwd: str, new_pwd: str, confirm_pwd: str, ip_address: str = "127.0.0.1") -> Tuple[bool, str]:
+    """
+    Altera a senha do administrador geral com validações estritas de segurança:
+    - Exige a senha atual para autorizar
+    - Exige mínimo de 8 caracteres
+    - Valida confirmação idêntica
+    - Reutiliza o mecanismo seguro de hash PBKDF2
+    - Registra auditoria sem expor senhas
+    """
+    from app.auth import verify_password, hash_password
+
+    if not current_pwd:
+        return False, "A senha atual é obrigatória."
+    if not new_pwd:
+        return False, "A nova senha é obrigatória."
+    if len(new_pwd) < 8:
+        return False, "A nova senha deve possuir no mínimo 8 caracteres."
+    if new_pwd != confirm_pwd:
+        return False, "A nova senha e a confirmação não coincidem."
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, email, password_hash, role, active FROM users WHERE id = ?", (admin_id,))
+    user = cursor.fetchone()
+    if not user or not user["active"]:
+        return False, "Usuário administrador não encontrado ou inativo."
+    if user["role"] != "ADMIN":
+        return False, "Apenas administradores podem alterar a senha por esta funcionalidade."
+
+    if not verify_password(current_pwd, user["password_hash"]):
+        return False, "A senha atual informada está incorreta."
+
+    new_hash = hash_password(new_pwd)
+    now = get_brasilia_now_iso()
+    with conn:
+        conn.execute("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?", (new_hash, now, admin_id))
+        log_audit(conn, admin_id, user["name"], "CHANGE_ADMIN_PASSWORD", "Senha do Administrador Geral alterada com sucesso.", ip_address)
+
+    return True, "Senha de administrador atualizada com sucesso."
+
