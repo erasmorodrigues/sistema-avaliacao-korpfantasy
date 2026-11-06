@@ -1264,3 +1264,180 @@ input:checked + .slider:before {
     grid-template-rows: repeat(2, 1fr);
   }
 }
+/* ---------------------------------------------------------------
+   RESPONSIVE EXTENSIONS (added for full mobile/tablet support)
+   --------------------------------------------------------------- */
+
+/* Scrollable tables on small screens */
+.table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+}
+
+/* Ensure tables use fixed layout and wrap long content */
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    word-wrap: break-word;
+}
+.data-table th,
+.data-table td {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+/* Judge candidates grid – fluid responsive columns */
+.judge-candidates-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+}
+
+/* Admin layout – sidebar + content */
+.admin-layout {
+    display: flex;
+    min-height: 100vh;
+}
+.admin-sidebar {
+    flex-basis: 250px;
+    background-color: var(--bg-card);
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+}
+.admin-content {
+    flex: 1;
+    padding: 1.5rem;
+}
+
+/* General responsive adjustments */
+@media (max-width: 768px) {
+    /* Header stacks vertically */
+    .header-container {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .header-actions {
+        margin-top: 0.5rem;
+    }
+    /* Admin layout becomes vertical */
+    .admin-layout {
+        flex-direction: column;
+    }
+    .admin-sidebar {
+        flex-basis: auto;
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .admin-content {
+        padding: 1rem;
+    }
+    .container {
+        padding: 1rem;
+    }
+    .login-card {
+        padding: 1.5rem;
+    }
+    /* Reduce KPI grid to single column on mobile */
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+    /* admin navigation items stack */
+    .admin-nav {
+        display: flex;
+        flex-direction: column;
+    }
+    .admin-nav-item {
+        margin-bottom: 0.5rem;
+    }
+    /* Tables: hide less important columns on small screens */
+    .admin-tab-pane .data-table th:nth-child(n+4),
+    .admin-tab-pane .data-table td:nth-child(n+4) {
+        display: none;
+    }
+    /* Ensure table cells wrap */
+    .admin-tab-pane .data-table th,
+    .admin-tab-pane .data-table td {
+        white-space: normal;
+        word-break: break-word;
+    }
+    /* Cards and winner spotlight adapt */
+    .winner-spotlight {
+        padding: 1rem;
+    }
+    .admin-tab-pane .table-container {
+        overflow-x: auto;
+    }
+}
+
+/* Prevent overflow of any element */
+* {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+    /* Header stacks vertically */
+    .header-container {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .header-actions {
+        margin-top: 0.5rem;
+    }
+    /* Admin layout becomes vertical */
+    .admin-layout {
+        flex-direction: column;
+    }
+    .admin-sidebar {
+        flex-basis: auto;
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .admin-content {
+        padding: 1rem;
+    }
+    .container {
+        padding: 1rem;
+    }
+    .login-card {
+        padding: 1.5rem;
+    }
+}
+
+/* Prevent overflow of any element */
+* {
+    max-width: 100%;
+    box-sizing: border-box;
+}
+/* Additional responsive tweaks for very small screens (mobile phones) */
+@media (max-width: 480px) {
+    /* Hide more table columns to fit screen */
+    .admin-tab-pane .data-table th:nth-child(n+3),
+    .admin-tab-pane .data-table td:nth-child(n+3) {
+        display: none;
+    }
+    /* Reduce padding in tables and cards */
+    .admin-tab-pane .data-table th,
+    .admin-tab-pane .data-table td {
+        padding: 0.3rem;
+    }
+    .admin-card, .winner-spotlight {
+        padding: 0.8rem;
+    }
+    /* Stack KPI cards vertically */
+    .kpi-grid {
+        grid-template-columns: 1fr;
+    }
+    /* Adjust header font sizes */
+    .brand-title {font-size: 1rem;}
+    .section-title {font-size: 1.2rem;}
+    .section-subtitle {font-size: 0.9rem;}
+}
